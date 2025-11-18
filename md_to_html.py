@@ -1,3 +1,12 @@
+"""
+Markdown to HTML Converter with Streamlit UI
+
+Security enhancements applied:
+- CSS injection prevention: validate base_font_size and content_width parameters
+- Path traversal prevention: filename validation rejects dotfiles and enforces alphanumeric start
+- Input sanitization: all user inputs are validated before use
+- HTML escaping: proper escaping for HTML, JavaScript, and CSS contexts
+"""
 import os
 import re
 import hashlib
@@ -35,7 +44,8 @@ def read_text_file(path: str) -> str:
 
 def validate_vendor_path(base_dir: str, filename: str) -> str:
     """Validate and resolve vendor file path to prevent traversal."""
-    if not re.match(r'^[a-zA-Z0-9._-]+$', filename):
+    # Require filename to start with alphanumeric (not dot) to prevent access to hidden files
+    if not re.match(r'^[a-zA-Z0-9][a-zA-Z0-9._-]*$', filename):
         st.error(f"Invalid filename: {filename}")
         st.stop()
     path = os.path.join(base_dir, filename)
@@ -132,12 +142,30 @@ def validate_date(date_str: str) -> bool:
     except ValueError:
         return False
 
+def validate_css_size(value: str) -> bool:
+    """Validate CSS size value to prevent injection."""
+    if not value:
+        return False
+    # Allow percentage, px, em, rem, vh, vw with optional decimal
+    pattern = r'^\d+(\.\d+)?(px|%|em|rem|vh|vw)$'
+    return bool(re.match(pattern, value))
+
+def sanitize_css_size(value: str, default: str) -> str:
+    """Sanitize CSS size value, return default if invalid."""
+    if validate_css_size(value):
+        return value
+    st.warning(f"Invalid CSS size value: {value}. Using default: {default}")
+    return default
+
 def sanitize_filename(name: str) -> str:
     """Sanitize filename for download."""
     if not name:
         return "document.html"
-    name = re.sub(r'[^\w\s.-]', '', name)
+    # Remove characters not in: word chars, whitespace, dot, underscore, or hyphen
+    name = re.sub(r'[^\w\s._-]', '', name)
+    # Replace multiple whitespace with single underscore
     name = re.sub(r'[\s]+', '_', name)
+    # Remove leading/trailing dots, underscores, or hyphens
     name = name.strip('._-')
     if not name:
         return "document.html"
@@ -387,8 +415,12 @@ def get_highlight_theme_css(highlight_theme: str) -> str:
 
 def generate_css(toc_mode: str, back_to_top: bool, search_enabled: bool, collapsible_mode: str, theme_preset: str = "default", highlight_enabled: bool = False, highlight_theme: str = "github-light", line_numbers: bool = False, base_font_size: str = "100%", content_width: str = "900px") -> str:
     """Generate CSS based on enabled features."""
+    # Validate and sanitize CSS values to prevent injection
+    safe_font_size = sanitize_css_size(base_font_size, "100%")
+    safe_content_width = sanitize_css_size(content_width, "900px")
+
     base_css = get_theme_css(theme_preset) + [
-        f":root{{--base-font-size:{base_font_size};--content-width:{content_width}}}",
+        f":root{{--base-font-size:{safe_font_size};--content-width:{safe_content_width}}}",
         "*{box-sizing:border-box}",
         f"body{{margin:0;background:var(--bg);color:var(--fg);line-height:1.55;font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Ubuntu,Cantarell,Noto Sans,sans-serif;font-size:var(--base-font-size)}}",
         "a{color:var(--link);text-decoration:underline}a:visited{color:var(--linkv)}a:hover{opacity:.8}",
