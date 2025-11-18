@@ -1,12 +1,14 @@
 # Markdown to HTML
 
-A Streamlit-based Markdown to standalone HTML converter optimized for statistical reports and technical documentation.
+A Streamlit-based Markdown to standalone HTML converter optimized for statistical reports and technical documentation. **Now with mdBook support for multi-chapter books!**
 
-Currently deployed at: https://mdtohtml.streamlit.app/ 
+Currently deployed at: https://mdtohtml.streamlit.app/
 
 ## Overview
 
 md_to_html.py converts Markdown documents into fully self-contained, offline HTML files with embedded JavaScript libraries. Perfect for data scientists, statisticians, and technical writers who need to create professional reports with code blocks, mathematical equations, and rich formatting.
+
+**New:** Convert entire mdBook projects (with multiple chapters) into a single, offline HTML file!
 
 All generated HTML files are completely standalone - no external dependencies, no internet connection required to view.
 
@@ -14,6 +16,7 @@ All generated HTML files are completely standalone - no external dependencies, n
 
 ### Core Functionality
 - **Standalone HTML Generation** - Creates completely self-contained HTML files with all JavaScript embedded
+- **mdBook Integration** - Convert multi-chapter mdBook projects into a single HTML file
 - **Security First** - Uses DOMPurify for XSS protection and implements path traversal prevention
 - **Responsive Design** - Mobile-friendly layouts that work on all screen sizes
 - **Dark/Light Theme Toggle** - Automatic theme switching with localStorage persistence
@@ -52,6 +55,7 @@ All generated HTML files are completely standalone - no external dependencies, n
 ### Requirements
 - Python 3.8 or higher
 - Streamlit
+- tomli (for Python < 3.11, built-in for Python >= 3.11)
 
 ### Setup
 
@@ -60,8 +64,8 @@ All generated HTML files are completely standalone - no external dependencies, n
 git clone https://github.com/yourusername/md_to_html.git
 cd md_to_html
 
-# Install Streamlit
-pip install streamlit
+# Install dependencies
+pip install -r requirements.txt
 
 # Vendor libraries are already included in the vendor/ directory:
 # - marked.umd.min.js (Markdown parser)
@@ -73,6 +77,12 @@ pip install streamlit
 
 ## Usage
 
+### Mode Selection
+
+The application supports two modes:
+1. **Single Markdown File** - Convert a single .md file
+2. **mdBook Project** - Convert an entire mdBook project with multiple chapters
+
 ### Starting the Application
 
 ```bash
@@ -81,7 +91,7 @@ streamlit run md_to_html.py
 
 This will open your default web browser to http://localhost:8501
 
-### Basic Workflow
+### Basic Workflow (Single File Mode)
 
 1. **Upload or Paste Markdown**
    - Upload a .md or .markdown file using the file uploader
@@ -112,6 +122,72 @@ This will open your default web browser to http://localhost:8501
    - Click the "Build HTML" button
    - Preview appears in the right panel
    - Click "Download offline HTML" to save the file
+
+### mdBook Project Workflow
+
+1. **Prepare Your mdBook Project**
+
+   Your mdBook project should have this structure:
+   ```
+   my-book/
+   ├── book.toml          # Configuration file
+   └── src/
+       ├── SUMMARY.md     # Table of contents
+       ├── intro.md       # Chapter files
+       ├── chapter1.md
+       └── ...
+   ```
+
+2. **Select mdBook Project Mode**
+   - Choose "mdBook Project" from the mode selector at the top
+
+3. **Enter Project Path**
+   - Enter the absolute or relative path to your mdBook project directory
+   - Example: `/home/user/my-book` or `./my-book`
+   - The application will automatically:
+     - Parse `book.toml` for book metadata
+     - Read `src/SUMMARY.md` to understand chapter structure
+     - Combine all referenced markdown files in order
+     - Generate chapter numbers automatically
+
+4. **Configure Options**
+   - Same configuration options as single file mode
+   - All features (syntax highlighting, math, themes, etc.) work with mdBook projects
+
+5. **Build HTML**
+   - Click "Build HTML" to generate the combined document
+   - All chapters will be merged into a single HTML file
+   - Table of contents will reflect the book structure
+   - Download the standalone HTML file
+
+### mdBook SUMMARY.md Format
+
+The `SUMMARY.md` file defines your book structure:
+
+```markdown
+# Summary
+
+[Introduction](./intro.md)
+
+# Part 1: Getting Started
+
+- [Chapter 1: Basics](./chapter1.md)
+  - [Section 1.1: Details](./chapter1/section1.md)
+- [Chapter 2: Advanced](./chapter2.md)
+
+---
+
+[Appendix](./appendix.md)
+```
+
+**Supported features:**
+- **Prefix chapters** (before first numbered chapter) - unnumbered
+- **Part titles** (# headings) - used as section dividers
+- **Numbered chapters** (indented with - or *) - automatically numbered (1, 1.1, 2, etc.)
+- **Nested chapters** - supports multiple levels of nesting
+- **Suffix chapters** (after separator ---) - unnumbered
+- **Draft chapters** `[Title]()` - shown as "under construction"
+- **Separators** (---) - visual dividers
 
 ## Configuration Details
 
@@ -200,9 +276,10 @@ All generated HTML includes:
    - All configuration done through the UI
    - No command-line batch processing
 
-4. **Single File**: Designed for single markdown files
-   - No multi-file projects or cross-references
-   - Each HTML is completely independent
+4. **Combined Output**: Multi-file projects are merged into a single HTML
+   - mdBook projects are combined into one HTML file
+   - Cross-references between original separate files become in-page links
+   - Each HTML output is completely independent
 
 ## Performance Considerations
 
