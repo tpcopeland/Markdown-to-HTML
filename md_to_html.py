@@ -3,6 +3,15 @@ import re
 import hashlib
 import datetime
 import streamlit as st
+from pathlib import Path
+from typing import List, Dict, Optional, Tuple
+try:
+    import tomli as toml  # Python < 3.11
+except ImportError:
+    try:
+        import tomllib as toml  # Python >= 3.11
+    except ImportError:
+        toml = None
 
 # ---------- App config ----------
 APP_TITLE = "Markdown -> Offline HTML"
@@ -135,6 +144,196 @@ def sanitize_filename(name: str) -> str:
     if not name.endswith('.html'):
         name += '.html'
     return name[:255]
+
+# ---------- mdBook Integration ----------
+
+class Chapter:
+    """Represents a chapter in an mdBook."""
+    def __init__(self, title: str, path: Optional[str] = None, level: int = 0,
+                 is_draft: bool = False, is_separator: bool = False,
+                 is_part_title: bool = False, number: Optional[str] = None):
+        self.title = title
+        self.path = path
+        self.level = level
+        self.is_draft = is_draft
+        self.is_separator = is_separator
+        self.is_part_title = is_part_title
+        self.number = number
+        self.content = ""
+        self.children: List[Chapter] = []
+
+    def __repr__(self):
+        return f"Chapter(title={self.title}, path={self.path}, level={self.level})"
+
+def parse_book_toml(toml_path: str) -> Dict:
+    """Parse book.toml configuration file."""
+    if toml is None:
+        st.warning("TOML parser not available. Install 'tomli' for Python < 3.11 or use Python >= 3.11")
+        return {"book": {"title": "Book", "authors": [], "language": "en"}}
+
+    try:
+        with open(toml_path, 'rb') as f:
+            config = toml.load(f)
+        return config
+    except Exception as e:
+        st.error(f"Failed to parse book.toml: {e}")
+        return {"book": {"title": "Book", "authors": [], "language": "en"}}
+
+def parse_summary_md(summary_path: str) -> List[Chapter]:
+    """Parse SUMMARY.md file and extract chapter structure."""
+    try:
+        with open(summary_path, 'r', encoding='utf-8') as f:
+            content = f.read()
+    except Exception as e:
+        st.error(f"Failed to read SUMMARY.md: {e}")
+        return []
+
+    chapters = []
+    lines = content.split('\n')
+    numbered_chapter_count = [0] * 10  # Support up to 10 levels of nesting
+    in_numbered_section = False
+
+    for line in lines:
+        # Skip empty lines
+        if not line.strip():
+            continue
+
+        # Check for separator (---)
+        if re.match(r'^-{3,}$', line.strip()):
+            chapters.append(Chapter("", is_separator=True))
+            continue
+
+        # Check for part title (# Title)
+        if line.strip().startswith('#'):
+            title = line.strip().lstrip('#').strip()
+            if title.lower() != 'summary':  # Ignore the main "Summary" title
+                chapters.append(Chapter(title, is_part_title=True))
+            continue
+
+        # Check for chapter link: [Title](path) or [Title]()
+        link_match = re.match(r'^(\s*)([-*])\s+\[([^\]]+)\]\(([^)]*)\)\s*$', line)
+        if link_match:
+            indent, marker, title, path = link_match.groups()
+            level = len(indent) // 2  # Assuming 2 spaces per level
+            is_draft = not path.strip()
+
+            # Determine if this is a numbered chapter
+            if not in_numbered_section and level == 0 and not is_draft:
+                # First root-level chapter with content starts numbered section
+                in_numbered_section = True
+
+            # Generate chapter number if in numbered section
+            chapter_number = None
+            if in_numbered_section and not is_draft:
+                numbered_chapter_count[level] += 1
+                # Reset deeper levels
+                for i in range(level + 1, len(numbered_chapter_count)):
+                    numbered_chapter_count[i] = 0
+                # Build number string (e.g., "1.2.3")
+                number_parts = [str(numbered_chapter_count[i]) for i in range(level + 1) if numbered_chapter_count[i] > 0]
+                chapter_number = '.'.join(number_parts)
+
+            chapter = Chapter(
+                title=title.strip(),
+                path=path.strip() if path.strip() else None,
+                level=level,
+                is_draft=is_draft,
+                number=chapter_number
+            )
+            chapters.append(chapter)
+
+    return chapters
+
+def read_markdown_file(base_path: str, file_path: str) -> str:
+    """Read a markdown file from mdBook src directory."""
+    try:
+        full_path = os.path.join(base_path, file_path)
+        with open(full_path, 'r', encoding='utf-8') as f:
+            return f.read()
+    except Exception as e:
+        st.warning(f"Failed to read {file_path}: {e}")
+        return f"<!-- Error reading {file_path}: {e} -->\n"
+
+def combine_chapters(chapters: List[Chapter], base_path: str) -> Tuple[str, List[Dict]]:
+    """
+    Combine all chapters into a single markdown document.
+    Returns the combined markdown and a list of chapter metadata.
+    """
+    combined_md = ""
+    chapter_metadata = []
+
+    for i, chapter in enumerate(chapters):
+        if chapter.is_separator:
+            combined_md += "\n---\n\n"
+            continue
+
+        if chapter.is_part_title:
+            combined_md += f"\n# {chapter.title}\n\n"
+            continue
+
+        if chapter.is_draft:
+            combined_md += f"\n## {chapter.title} (Draft)\n\n"
+            combined_md += "*This chapter is under construction.*\n\n"
+            continue
+
+        if chapter.path:
+            # Add chapter heading
+            heading_level = "#" * (chapter.level + 2)  # H2 for root level, H3 for level 1, etc.
+            chapter_title = chapter.title
+            if chapter.number:
+                chapter_title = f"{chapter.number}. {chapter.title}"
+
+            combined_md += f"\n{heading_level} {chapter_title}\n\n"
+
+            # Read and add chapter content
+            content = read_markdown_file(base_path, chapter.path)
+
+            # Remove the first H1 from content if it exists (we already added the heading)
+            content_lines = content.split('\n')
+            if content_lines and content_lines[0].strip().startswith('# '):
+                content_lines = content_lines[1:]
+            content = '\n'.join(content_lines)
+
+            combined_md += content + "\n\n"
+
+            # Track chapter metadata for navigation
+            chapter_metadata.append({
+                "title": chapter_title,
+                "number": chapter.number,
+                "level": chapter.level,
+                "index": i
+            })
+
+    return combined_md, chapter_metadata
+
+def process_mdbook_project(project_path: str) -> Tuple[str, Dict, List[Dict]]:
+    """
+    Process an mdBook project directory.
+    Returns: (combined_markdown, book_config, chapter_metadata)
+    """
+    project_path = Path(project_path)
+
+    # Read book.toml
+    book_toml_path = project_path / "book.toml"
+    if book_toml_path.exists():
+        config = parse_book_toml(str(book_toml_path))
+    else:
+        st.warning("book.toml not found, using defaults")
+        config = {"book": {"title": "Book", "authors": [], "language": "en"}}
+
+    # Read SUMMARY.md
+    summary_path = project_path / "src" / "SUMMARY.md"
+    if not summary_path.exists():
+        st.error("SUMMARY.md not found in src/ directory")
+        return "", config, []
+
+    chapters = parse_summary_md(str(summary_path))
+
+    # Combine all chapters
+    base_path = str(project_path / "src")
+    combined_md, chapter_metadata = combine_chapters(chapters, base_path)
+
+    return combined_md, config, chapter_metadata
 
 # ---------- HTML Generation ----------
 def get_theme_css(theme_preset: str) -> list:
@@ -942,21 +1141,56 @@ def build_html(
 # ---------- Streamlit UI ----------
 st.set_page_config(page_title=APP_TITLE, layout="wide")
 st.title(APP_TITLE)
-st.caption("Build a single, offline HTML from Markdown using Marked.js and DOMPurify. Includes syntax highlighting, math rendering, multiple themes, ToC, collapsible sections, and in-page search.")
+st.caption("Build a single, offline HTML from Markdown using Marked.js and DOMPurify. Includes syntax highlighting, math rendering, multiple themes, ToC, collapsible sections, and in-page search. Now supports mdBook projects!")
+
+# Mode selection
+mode = st.radio(
+    "Input Mode",
+    ["Single Markdown File", "mdBook Project"],
+    horizontal=True,
+    help="Choose single file mode or mdBook project mode for multi-chapter books"
+)
 
 uploaded_filename = None
+md_text = ""
+book_config = None
+chapter_metadata = []
 
 with st.container(border=True):
     st.subheader("Source")
-    uploaded = st.file_uploader("Upload a .md file", type=["md", "markdown"])
-    md_text = ""
-    if uploaded is not None:
-        try:
-            md_text = uploaded.read().decode("utf-8")
-            uploaded_filename = uploaded.name
-        except Exception as e:
-            st.error(f"Failed to read file: {e}")
-    md_text = st.text_area("Or paste Markdown", value=md_text, height=260, placeholder="# Title\n\n...")
+
+    if mode == "Single Markdown File":
+        uploaded = st.file_uploader("Upload a .md file", type=["md", "markdown"])
+        if uploaded is not None:
+            try:
+                md_text = uploaded.read().decode("utf-8")
+                uploaded_filename = uploaded.name
+            except Exception as e:
+                st.error(f"Failed to read file: {e}")
+        md_text = st.text_area("Or paste Markdown", value=md_text, height=260, placeholder="# Title\n\n...")
+
+    else:  # mdBook Project mode
+        st.markdown("**Enter the path to your mdBook project directory:**")
+        st.caption("The directory should contain `book.toml` and `src/SUMMARY.md`")
+
+        project_path = st.text_input(
+            "mdBook Project Path",
+            placeholder="/path/to/your/mdbook/project",
+            help="Absolute or relative path to mdBook project root directory"
+        )
+
+        if project_path:
+            if os.path.exists(project_path) and os.path.isdir(project_path):
+                try:
+                    md_text, book_config, chapter_metadata = process_mdbook_project(project_path)
+                    if md_text:
+                        st.success(f"✓ Loaded mdBook project with {len(chapter_metadata)} chapters")
+                        with st.expander("Preview combined markdown (first 500 chars)"):
+                            st.code(md_text[:500] + "..." if len(md_text) > 500 else md_text, language="markdown")
+                except Exception as e:
+                    st.error(f"Failed to process mdBook project: {e}")
+            else:
+                st.error("Directory not found. Please enter a valid path.")
 
 st.divider()
 
@@ -1039,16 +1273,20 @@ with build_col:
     st.subheader("Build")
     if st.button("Build HTML", type="primary", use_container_width=True):
         if not md_text.strip():
-            st.warning("Provide Markdown via upload or paste.")
+            st.warning("Provide Markdown via upload, paste, or mdBook project path.")
         else:
             try:
                 vendor_libs = load_vendor_js(use_highlight=highlight_enabled, use_katex=katex_enabled)
 
-                # Auto-detect title from H1
-                final_title = "Document"
-                match = re.search(r'^\s*#\s+([^\n]+)', md_text, re.MULTILINE)
-                if match:
-                    final_title = match.group(1).strip()
+                # Determine title based on mode
+                if mode == "mdBook Project" and book_config:
+                    final_title = book_config.get("book", {}).get("title", "Book")
+                else:
+                    # Auto-detect title from H1
+                    final_title = "Document"
+                    match = re.search(r'^\s*#\s+([^\n]+)', md_text, re.MULTILINE)
+                    if match:
+                        final_title = match.group(1).strip()
 
                 meta = {
                     "title": final_title,
@@ -1066,8 +1304,11 @@ with build_col:
                     theme_preset_value, highlight_enabled, highlight_theme, katex_enabled,
                     line_numbers, base_font_size_value, content_width_value
                 )
-                
-                if uploaded_filename:
+
+                # Determine default filename
+                if mode == "mdBook Project":
+                    default_name = sanitize_filename(final_title)
+                elif uploaded_filename:
                     default_name = uploaded_filename.rsplit('.', 1)[0] + '.html'
                 else:
                     default_name = sanitize_filename(final_title)
