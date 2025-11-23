@@ -4,8 +4,15 @@ Markdown to HTML Converter with Streamlit UI
 Security enhancements applied:
 - CSS injection prevention: validate base_font_size and content_width parameters
 - Path traversal prevention: filename validation rejects dotfiles and enforces alphanumeric start
+- Path traversal prevention: safe_read_file() ensures files are within base directory
+- Path traversal prevention: validate_project_path() blocks access to sensitive system directories
 - Input sanitization: all user inputs are validated before use
 - HTML escaping: proper escaping for HTML, JavaScript, and CSS contexts
+
+Bug fixes applied:
+- Math rendering: protect math expressions ($...$, $$...$$) from Markdown parser
+- Download button: use session state to persist button across re-renders
+- Relative paths: resolve VENDOR_DIR relative to script location, not CWD
 """
 import os
 import re
@@ -24,7 +31,9 @@ except ImportError:
 
 # ---------- App config ----------
 APP_TITLE = "Markdown -> Offline HTML"
-VENDOR_DIR = "vendor"
+# Resolve paths relative to the script file (Fix: fragile relative paths)
+APP_DIR = os.path.dirname(os.path.abspath(__file__))
+VENDOR_DIR = os.path.join(APP_DIR, "vendor")
 MARKED_FILE = "marked.umd.min.js"
 PURIFY_FILE = "purify.min.js"
 HIGHLIGHT_FILE = "highlight.min.js"
@@ -173,6 +182,24 @@ def sanitize_filename(name: str) -> str:
         name += '.html'
     return name[:255]
 
+def safe_read_file(base_dir: str, relative_path: str) -> str:
+    """
+    Safely read a file ensuring it is within the base directory.
+    Prevents path traversal attacks (e.g., ../../../../etc/passwd).
+    """
+    # Normalize and resolve both paths to absolute
+    base_abs = os.path.abspath(os.path.normpath(base_dir))
+    # Join and normalize the target path
+    target_abs = os.path.abspath(os.path.normpath(os.path.join(base_dir, relative_path)))
+
+    # Ensure the resolved target starts with the base directory
+    # Use os.sep to ensure we're checking full directory components
+    if not (target_abs.startswith(base_abs + os.sep) or target_abs == base_abs):
+        raise ValueError(f"Security violation: Path '{relative_path}' resolves outside base directory.")
+
+    with open(target_abs, "r", encoding="utf-8") as f:
+        return f.read()
+
 # ---------- mdBook Integration ----------
 
 class Chapter:
@@ -273,11 +300,14 @@ def parse_summary_md(summary_path: str) -> List[Chapter]:
     return chapters
 
 def read_markdown_file(base_path: str, file_path: str) -> str:
-    """Read a markdown file from mdBook src directory."""
+    """Read a markdown file from mdBook src directory with path traversal protection."""
     try:
-        full_path = os.path.join(base_path, file_path)
-        with open(full_path, 'r', encoding='utf-8') as f:
-            return f.read()
+        # Use safe_read_file to prevent path traversal attacks
+        return safe_read_file(base_path, file_path)
+    except ValueError as e:
+        # Security violation - path traversal attempted
+        st.error(f"Security Error: {e}")
+        return f"<!-- Security Error: Attempted path traversal to {file_path} -->\n"
     except Exception as e:
         st.warning(f"Failed to read {file_path}: {e}")
         return f"<!-- Error reading {file_path}: {e} -->\n"
@@ -334,12 +364,42 @@ def combine_chapters(chapters: List[Chapter], base_path: str) -> Tuple[str, List
 
     return combined_md, chapter_metadata
 
+def validate_project_path(project_path: str) -> Tuple[bool, str]:
+    """
+    Validate an mdBook project path for security.
+    Returns: (is_valid, error_message)
+    """
+    if not project_path:
+        return False, "Project path is empty."
+
+    # Normalize the path
+    normalized = os.path.normpath(project_path)
+
+    # Check for path traversal patterns
+    if '..' in normalized.split(os.sep):
+        return False, "Path traversal patterns (..) are not allowed."
+
+    # Check if it's an absolute path pointing to sensitive system directories
+    abs_path = os.path.abspath(normalized)
+    sensitive_dirs = ['/etc', '/var', '/root', '/home/root', '/sys', '/proc', '/dev', '/boot']
+    for sensitive in sensitive_dirs:
+        if abs_path == sensitive or abs_path.startswith(sensitive + os.sep):
+            return False, f"Access to system directory '{sensitive}' is not allowed."
+
+    return True, ""
+
 def process_mdbook_project(project_path: str) -> Tuple[str, Dict, List[Dict]]:
     """
     Process an mdBook project directory.
     Returns: (combined_markdown, book_config, chapter_metadata)
     """
-    project_path = Path(project_path)
+    # Validate the project path for security
+    is_valid, error_msg = validate_project_path(project_path)
+    if not is_valid:
+        st.error(f"Security Error: {error_msg}")
+        return "", {"book": {"title": "Book", "authors": [], "language": "en"}}, []
+
+    project_path = Path(os.path.abspath(project_path))
 
     # Read book.toml
     book_toml_path = project_path / "book.toml"
@@ -357,7 +417,7 @@ def process_mdbook_project(project_path: str) -> Tuple[str, Dict, List[Dict]]:
 
     chapters = parse_summary_md(str(summary_path))
 
-    # Combine all chapters
+    # Combine all chapters - base_path is the src directory
     base_path = str(project_path / "src")
     combined_md, chapter_metadata = combine_chapters(chapters, base_path)
 
@@ -626,12 +686,41 @@ def generate_javascript(
     document.getElementById('md-target').textContent = 'Error: DOMPurify not found.'; return;
   }
 
-  // Render Markdown
+  // Math protection: Protect math expressions from Markdown parser
+  // This prevents $x * y$ from being converted to $x <em> y$
+  var mathPlaceholders = [];
+  function protectMath(text) {
+    // Protect display math ($$...$$) first
+    text = text.replace(/\$\$([^$]+)\$\$/g, function(match) {
+      var idx = mathPlaceholders.length;
+      mathPlaceholders.push(match);
+      return '@@MATH_DISPLAY_' + idx + '@@';
+    });
+    // Protect inline math ($...$) - but not currency like $100
+    // Use negative lookbehind simulation: match $ not preceded by backslash
+    text = text.replace(/(?<![\\$])\$([^$\n]+)\$(?!\$)/g, function(match) {
+      var idx = mathPlaceholders.length;
+      mathPlaceholders.push(match);
+      return '@@MATH_INLINE_' + idx + '@@';
+    });
+    return text;
+  }
+  function restoreMath(text) {
+    return text.replace(/@@MATH_(DISPLAY|INLINE)_(\d+)@@/g, function(match, type, idx) {
+      return mathPlaceholders[parseInt(idx, 10)] || match;
+    });
+  }
+
+  // Render Markdown with math protection
   if (window.marked.setOptions) {
     window.marked.setOptions({ gfm:true, breaks:false, headerIds:false, mangle:false });
   }
   var md = document.getElementById('md-source').textContent;
-  var rawHtml = window.marked.parse(md);
+  // Protect math expressions before Markdown parsing
+  var mdProtected = protectMath(md);
+  var rawHtml = window.marked.parse(mdProtected);
+  // Restore math expressions after parsing
+  rawHtml = restoreMath(rawHtml);
   var cleanHtml = window.DOMPurify.sanitize(rawHtml, { USE_PROFILES:{ html:true } });
   var target = document.getElementById('md-target');
   target.innerHTML = cleanHtml;
@@ -1344,17 +1433,25 @@ with build_col:
                     default_name = uploaded_filename.rsplit('.', 1)[0] + '.html'
                 else:
                     default_name = sanitize_filename(final_title)
-                st.download_button(
-                    "Download offline HTML",
-                    data=html.encode("utf-8"),
-                    file_name=default_name,
-                    mime="text/html",
-                    use_container_width=True
-                )
+
+                # Store result in session state (Fix: disappearing download button)
+                st.session_state["generated_html"] = html
+                st.session_state["generated_name"] = default_name
                 st.session_state["last_html"] = html
-                st.success("HTML built successfully")
+                st.success("HTML built successfully!")
             except Exception as e:
                 st.error(f"Build failed: {e}")
+
+    # Render download button outside the if block using session state
+    # This ensures the button persists after clicking download
+    if "generated_html" in st.session_state:
+        st.download_button(
+            "Download offline HTML",
+            data=st.session_state["generated_html"].encode("utf-8"),
+            file_name=st.session_state.get("generated_name", "document.html"),
+            mime="text/html",
+            use_container_width=True
+        )
 
 with preview_col:
     st.subheader("Preview")
