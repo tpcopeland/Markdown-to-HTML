@@ -60,7 +60,9 @@ def validate_vendor_path(base_dir: str, filename: str) -> str:
     path = os.path.join(base_dir, filename)
     resolved = os.path.abspath(path)
     base_resolved = os.path.abspath(base_dir)
-    if not resolved.startswith(base_resolved):
+    # Use os.sep to ensure we're checking full directory components
+    # This prevents /home/user from matching /home/username
+    if not (resolved.startswith(base_resolved + os.sep) or resolved == base_resolved):
         st.error("Path traversal detected")
         st.stop()
     return resolved
@@ -138,8 +140,9 @@ def escape_for_script_tag(s: str) -> str:
     """Escape string for safe inclusion in a <script> data block."""
     if not s:
         return ""
-    # Only need to escape </script> to prevent HTML parser from closing the tag
-    return s.replace("</script>", "<\\/script>")
+    # Escape </script> case-insensitively to prevent HTML parser from closing the tag
+    # HTML parsers are case-insensitive, so </SCRIPT>, </Script>, etc. would all close the tag
+    return re.sub(r'</script>', r'<\\/script>', s, flags=re.IGNORECASE)
 
 def validate_date(date_str: str) -> bool:
     """Validate ISO date format."""
@@ -306,8 +309,9 @@ def read_markdown_file(base_path: str, file_path: str) -> str:
         return safe_read_file(base_path, file_path)
     except ValueError as e:
         # Security violation - path traversal attempted
+        # Log the error but don't expose file paths in output (information disclosure)
         st.error(f"Security Error: {e}")
-        return f"<!-- Security Error: Attempted path traversal to {file_path} -->\n"
+        return "<!-- Security Error: Invalid file path -->\n"
     except Exception as e:
         st.warning(f"Failed to read {file_path}: {e}")
         return f"<!-- Error reading {file_path}: {e} -->\n"
@@ -573,7 +577,7 @@ def generate_toolbar(title: str, toc_mode: str, search_enabled: bool, theme_pres
 
 
 
-def generate_toc_containers(toc_mode: str) -> tuple[str, str]:
+def generate_toc_containers(toc_mode: str) -> Tuple[str, str]:
     """Generate ToC container HTML."""
     top_toc = (
         '  <nav id="toc" aria-label="Table of contents">\n'
