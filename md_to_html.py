@@ -185,6 +185,17 @@ def sanitize_filename(name: str) -> str:
         name += '.html'
     return name[:255]
 
+def sanitize_for_html_comment(text: str) -> str:
+    """Sanitize text for safe inclusion in HTML comments.
+
+    Prevents HTML comment breakout attacks by escaping -- sequences.
+    """
+    if not text:
+        return ""
+    # Replace -- with encoded version to prevent comment breakout
+    # Also handle > after -- which closes comments
+    return text.replace("--", "&#45;&#45;").replace(">", "&gt;")
+
 def safe_read_file(base_dir: str, relative_path: str) -> str:
     """
     Safely read a file ensuring it is within the base directory.
@@ -312,9 +323,19 @@ def read_markdown_file(base_path: str, file_path: str) -> str:
         # Log the error but don't expose file paths in output (information disclosure)
         st.error(f"Security Error: {e}")
         return "<!-- Security Error: Invalid file path -->\n"
+    except FileNotFoundError:
+        # File not found - only expose the filename, not the full path
+        filename = os.path.basename(file_path) if file_path else "unknown"
+        safe_filename = sanitize_for_html_comment(filename)
+        st.warning(f"File not found: {filename}")
+        return f"<!-- File not found: {safe_filename} -->\n"
     except Exception as e:
-        st.warning(f"Failed to read {file_path}: {e}")
-        return f"<!-- Error reading {file_path}: {e} -->\n"
+        # Generic error - sanitize the output to prevent HTML comment breakout
+        filename = os.path.basename(file_path) if file_path else "unknown"
+        safe_filename = sanitize_for_html_comment(filename)
+        error_type = type(e).__name__
+        st.warning(f"Failed to read {filename}: {error_type}")
+        return f"<!-- Error reading {safe_filename}: {sanitize_for_html_comment(error_type)} -->\n"
 
 def combine_chapters(chapters: List[Chapter], base_path: str) -> Tuple[str, List[Dict]]:
     """
@@ -557,10 +578,10 @@ def generate_toolbar(title: str, toc_mode: str, search_enabled: bool, theme_pres
         '</div>'
         if search_enabled else ""
     )
-    # Only show theme toggle if not using Dark theme preset
+    # Only show theme toggle if not using dark theme preset
     theme_toggle = (
         '<button id="themeToggle" type="button" aria-pressed="false" aria-label="Toggle light and dark theme">Toggle Light/Dark</button>\n      '
-        if theme_preset != "Dark" else ""
+        if theme_preset != "dark" else ""
     )
     return (
         '<header class="toolbar" role="banner" aria-label="Toolbar">\n'
@@ -701,11 +722,13 @@ def generate_javascript(
       return '@@MATH_DISPLAY_' + idx + '@@';
     });
     // Protect inline math ($...$) - but not currency like $100
-    // Use negative lookbehind simulation: match $ not preceded by backslash
-    text = text.replace(/(?<![\\$])\$([^$\n]+)\$(?!\$)/g, function(match) {
+    // Use compatible approach without lookbehind (for older browsers like Safari < 16.4)
+    // Match: (start or non-$\) followed by $...$, not followed by $
+    text = text.replace(/(^|[^\\$])\$([^$\n]+)\$(?!\$)/g, function(match, prefix, content) {
       var idx = mathPlaceholders.length;
-      mathPlaceholders.push(match);
-      return '@@MATH_INLINE_' + idx + '@@';
+      var mathExpr = '$' + content + '$';
+      mathPlaceholders.push(mathExpr);
+      return prefix + '@@MATH_INLINE_' + idx + '@@';
     });
     return text;
   }
@@ -1221,8 +1244,6 @@ def build_html(
     safe_md = escape_for_script_tag(md_text)
 
     title = meta.get("title") or "Document"
-    dtype = meta.get("doctype") or "Document"
-    vers = meta.get("version") or "1.0"
 
     css = generate_css(toc_mode, back_to_top, search_enabled, collapsible_mode, theme_preset, highlight_enabled, highlight_theme, line_numbers, base_font_size, content_width)
     katex_css = vendor_libs.get("katex_css", "") if katex_enabled else ""
@@ -1233,7 +1254,7 @@ def build_html(
     katex_css_tag = f"<style>\n{katex_css}\n</style>\n" if katex_css else ""
 
     # Set initial theme based on preset
-    initial_theme = "dark" if theme_preset == "Dark" else "light"
+    initial_theme = "dark" if theme_preset == "dark" else "light"
 
     html = (
         "<!doctype html>\n"
