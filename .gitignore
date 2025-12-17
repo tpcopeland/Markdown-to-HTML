@@ -26,8 +26,7 @@ wheels/
 # Streamlit
 .streamlit/
 
-# Testing
-test_*.py
+# Testing (allow tests/ directory)
 test-*/
 
 # IDE
