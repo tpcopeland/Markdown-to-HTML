@@ -181,9 +181,10 @@ def sanitize_filename(name: str) -> str:
     name = name.strip('._-')
     if not name:
         return "document.html"
-    if not name.endswith('.html'):
-        name += '.html'
-    return name[:255]
+    # Extract base name and truncate to leave room for .html extension
+    base = name[:-5] if name.endswith('.html') else name
+    base = base[:250]  # 250 + 5 (.html) = 255 max
+    return base + '.html'
 
 def sanitize_for_html_comment(text: str) -> str:
     """Sanitize text for safe inclusion in HTML comments.
@@ -716,15 +717,15 @@ def generate_javascript(
   var mathPlaceholders = [];
   function protectMath(text) {
     // Protect display math ($$...$$) first
-    text = text.replace(/\$\$([^$]+)\$\$/g, function(match) {
+    text = text.replace(/\\$\\$([^$]+)\\$\\$/g, function(match) {
       var idx = mathPlaceholders.length;
       mathPlaceholders.push(match);
       return '@@MATH_DISPLAY_' + idx + '@@';
     });
     // Protect inline math ($...$) - but not currency like $100
     // Use compatible approach without lookbehind (for older browsers like Safari < 16.4)
-    // Match: (start or non-$\) followed by $...$, not followed by $
-    text = text.replace(/(^|[^\\$])\$([^$\n]+)\$(?!\$)/g, function(match, prefix, content) {
+    // Match: (start or non-$\\) followed by $...$, not followed by $
+    text = text.replace(/(^|[^\\$])\\$([^$\\n]+)\\$(?!\\$)/g, function(match, prefix, content) {
       var idx = mathPlaceholders.length;
       var mathExpr = '$' + content + '$';
       mathPlaceholders.push(mathExpr);
@@ -733,7 +734,7 @@ def generate_javascript(
     return text;
   }
   function restoreMath(text) {
-    return text.replace(/@@MATH_(DISPLAY|INLINE)_(\d+)@@/g, function(match, type, idx) {
+    return text.replace(/@@MATH_(DISPLAY|INLINE)_(\\d+)@@/g, function(match, type, idx) {
       return mathPlaceholders[parseInt(idx, 10)] || match;
     });
   }
@@ -754,7 +755,7 @@ def generate_javascript(
 
   // Utilities
   function slugify(s){
-    return (s||'').toLowerCase().replace(/[^a-z0-9\s-]/g,'').trim().replace(/\s+/g,'-').replace(/-+/g,'-');
+    return (s||'').toLowerCase().replace(/[^a-z0-9\\s-]/g,'').trim().replace(/\\s+/g,'-').replace(/-+/g,'-');
   }
   function isHeading(el){ return el && /^H[1-6]$/.test(el.tagName); }
   function headingLevel(tag){ return parseInt(tag.replace('H',''), 10); }
@@ -999,7 +1000,7 @@ def generate_javascript(
     if (prev && prev.nodeType === 8){ // Comment node
       var comment = prev.textContent.trim();
       // Match patterns like "Section: Label" or just "Label"
-      var labelMatch = comment.match(/^(?:Section:\s*)?(.+)$/i);
+      var labelMatch = comment.match(/^(?:Section:\\s*)?(.+)$/i);
       if (labelMatch){
         var label = labelMatch[1].trim();
         hr.classList.add('labeled');

@@ -374,6 +374,230 @@ class TestChapterParsing(unittest.TestCase):
         self.assertEqual(chapter.level, 0)
         self.assertFalse(chapter.is_draft)
 
+    def test_chapter_repr(self):
+        """Test Chapter string representation."""
+        chapter = md_to_html.Chapter(title="Test", path="test.md", level=1)
+        repr_str = repr(chapter)
+        self.assertIn("Test", repr_str)
+        self.assertIn("test.md", repr_str)
+
+
+class TestSanitizeFilenameExtended(unittest.TestCase):
+    """Extended tests for filename sanitization including truncation."""
+
+    def test_sanitize_filename_long_truncation(self):
+        """Test that long filenames are properly truncated while preserving .html extension."""
+        # Very long filename should be truncated to 255 chars max with .html preserved
+        long_name = "a" * 300
+        result = md_to_html.sanitize_filename(long_name)
+        self.assertEqual(len(result), 255)
+        self.assertTrue(result.endswith(".html"))
+        self.assertEqual(result, "a" * 250 + ".html")
+
+    def test_sanitize_filename_boundary_cases(self):
+        """Test boundary cases for filename length."""
+        # Exactly 250 chars - should become 255 with .html
+        name_250 = "b" * 250
+        result = md_to_html.sanitize_filename(name_250)
+        self.assertEqual(len(result), 255)
+        self.assertTrue(result.endswith(".html"))
+
+        # 251 chars - should be truncated to 250 + .html = 255
+        name_251 = "c" * 251
+        result = md_to_html.sanitize_filename(name_251)
+        self.assertEqual(len(result), 255)
+        self.assertTrue(result.endswith(".html"))
+
+    def test_sanitize_filename_long_with_html_extension(self):
+        """Test long filename that already has .html extension."""
+        long_with_ext = "d" * 300 + ".html"
+        result = md_to_html.sanitize_filename(long_with_ext)
+        self.assertEqual(len(result), 255)
+        self.assertTrue(result.endswith(".html"))
+        self.assertEqual(result, "d" * 250 + ".html")
+
+    def test_sanitize_filename_only_special_chars(self):
+        """Test filename with only strippable characters."""
+        self.assertEqual(md_to_html.sanitize_filename(".."), "document.html")
+        self.assertEqual(md_to_html.sanitize_filename("___"), "document.html")
+        self.assertEqual(md_to_html.sanitize_filename("-.-"), "document.html")
+        self.assertEqual(md_to_html.sanitize_filename("..."), "document.html")
+
+    def test_sanitize_filename_whitespace(self):
+        """Test filename with whitespace characters."""
+        self.assertEqual(md_to_html.sanitize_filename("test file"), "test_file.html")
+        self.assertEqual(md_to_html.sanitize_filename("test  file"), "test_file.html")
+        self.assertEqual(md_to_html.sanitize_filename("  test  "), "test.html")
+
+
+class TestGenerateJavascript(unittest.TestCase):
+    """Test JavaScript generation."""
+
+    def test_generate_javascript_basic(self):
+        """Test basic JavaScript generation with mocked vendor libs."""
+        vendor_libs = {
+            "marked": "// marked.js placeholder",
+            "purify": "// purify.js placeholder"
+        }
+        js = md_to_html.generate_javascript(
+            vendor_libs=vendor_libs,
+            toc_mode="none",
+            toc_levels="h2",
+            collapsible_mode="none",
+            start_collapsed=False,
+            back_to_top=False,
+            search_enabled=False,
+            highlight_enabled=False,
+            katex_enabled=False,
+            line_numbers=False
+        )
+        # Should contain script tags
+        self.assertIn("<script>", js)
+        # Should contain the constants
+        self.assertIn("TOC_MODE", js)
+        self.assertIn("SEARCH_ENABLED", js)
+
+    def test_generate_javascript_escape_sequences(self):
+        """Test that JavaScript contains properly escaped regex patterns."""
+        vendor_libs = {
+            "marked": "// marked.js",
+            "purify": "// purify.js"
+        }
+        js = md_to_html.generate_javascript(
+            vendor_libs=vendor_libs,
+            toc_mode="none",
+            toc_levels="h2",
+            collapsible_mode="none",
+            start_collapsed=False,
+            back_to_top=False,
+            search_enabled=False,
+            highlight_enabled=False,
+            katex_enabled=False,
+            line_numbers=False
+        )
+        # Should contain properly escaped dollar signs in regex
+        self.assertIn(r"/\$\$", js)  # Display math regex
+        # Should contain properly escaped whitespace pattern
+        self.assertIn(r"\s", js)  # slugify function
+
+
+class TestBuildHtml(unittest.TestCase):
+    """Test HTML building."""
+
+    def test_build_html_basic(self):
+        """Test basic HTML generation."""
+        vendor_libs = {
+            "marked": "// marked.js placeholder",
+            "purify": "// purify.js placeholder"
+        }
+        html = md_to_html.build_html(
+            md_text="# Test\n\nHello world",
+            meta={"title": "Test Document"},
+            vendor_libs=vendor_libs,
+            toc_mode="none",
+            toc_levels="h2",
+            back_to_top=False,
+            search_enabled=False,
+            collapsible_mode="none",
+            start_collapsed=False,
+            theme_preset="default",
+            highlight_enabled=False,
+            highlight_theme="github-light",
+            katex_enabled=False,
+            line_numbers=False,
+            base_font_size="100%",
+            content_width="900px"
+        )
+        # Should be valid HTML structure
+        self.assertIn("<!doctype html>", html)
+        self.assertIn("<html", html)
+        self.assertIn("</html>", html)
+        self.assertIn("<title>Test Document</title>", html)
+        # Should contain the markdown in script tag
+        self.assertIn("# Test", html)
+        self.assertIn("Hello world", html)
+
+    def test_build_html_escapes_script_in_markdown(self):
+        """Test that script tags in markdown are escaped."""
+        vendor_libs = {
+            "marked": "// marked.js",
+            "purify": "// purify.js"
+        }
+        html = md_to_html.build_html(
+            md_text="Test </script> content",
+            meta={"title": "Test"},
+            vendor_libs=vendor_libs,
+            toc_mode="none",
+            toc_levels="h2",
+            back_to_top=False,
+            search_enabled=False,
+            collapsible_mode="none",
+            start_collapsed=False
+        )
+        # Should not contain unescaped </script> in the markdown section
+        # The md-source script tag should not be prematurely closed
+        self.assertIn("md-source", html)
+        # Count script tags - should be balanced
+        open_tags = html.count("<script")
+        close_tags = html.count("</script>")
+        self.assertEqual(open_tags, close_tags)
+
+
+class TestHighlightThemeCss(unittest.TestCase):
+    """Test syntax highlighting theme CSS."""
+
+    def test_get_highlight_theme_css_valid(self):
+        """Test valid highlight themes return CSS."""
+        themes = ["github-light", "github-dark", "monokai", "atom-one-dark"]
+        for theme in themes:
+            css = md_to_html.get_highlight_theme_css(theme)
+            self.assertIsInstance(css, str)
+            self.assertIn(".hljs", css)
+
+    def test_get_highlight_theme_css_invalid(self):
+        """Test invalid theme falls back to github-light."""
+        result = md_to_html.get_highlight_theme_css("nonexistent")
+        default = md_to_html.get_highlight_theme_css("github-light")
+        self.assertEqual(result, default)
+
+
+class TestGenerateTocContainers(unittest.TestCase):
+    """Test ToC container generation."""
+
+    def test_generate_toc_containers_top(self):
+        """Test top ToC container generation."""
+        top, sidebar = md_to_html.generate_toc_containers("top")
+        self.assertIn('id="toc"', top)
+        self.assertIn("Table of Contents", top)
+        self.assertEqual(sidebar, "")
+
+    def test_generate_toc_containers_sidebar(self):
+        """Test sidebar ToC container generation."""
+        top, sidebar = md_to_html.generate_toc_containers("sidebar")
+        self.assertEqual(top, "")
+        self.assertIn('id="toc-sidebar"', sidebar)
+        self.assertIn("tocSidebarClose", sidebar)
+
+    def test_generate_toc_containers_none(self):
+        """Test no ToC container generation."""
+        top, sidebar = md_to_html.generate_toc_containers("none")
+        self.assertEqual(top, "")
+        self.assertEqual(sidebar, "")
+
+
+class TestSanitizeCssSize(unittest.TestCase):
+    """Test CSS size sanitization."""
+
+    def test_sanitize_css_size_valid(self):
+        """Test valid CSS sizes are returned unchanged."""
+        self.assertEqual(md_to_html.sanitize_css_size("100%", "50%"), "100%")
+        self.assertEqual(md_to_html.sanitize_css_size("16px", "12px"), "16px")
+
+    def test_sanitize_css_size_invalid_uses_default(self):
+        """Test invalid CSS sizes return the default."""
+        self.assertEqual(md_to_html.sanitize_css_size("invalid", "100%"), "100%")
+        self.assertEqual(md_to_html.sanitize_css_size("", "50px"), "50px")
+
 
 if __name__ == "__main__":
     unittest.main()
