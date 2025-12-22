@@ -1,5 +1,9 @@
 """
-Markdown to HTML Converter with Streamlit UI
+Markdown Converter with Streamlit UI
+
+Converts Markdown to multiple output formats:
+- HTML: Standalone offline document with syntax highlighting, math rendering, themes, ToC, search
+- DOCX: Word document via pandoc (optional dependency)
 
 Security enhancements applied:
 - CSS injection prevention: validate base_font_size and content_width parameters
@@ -9,6 +13,8 @@ Security enhancements applied:
 - Script tag escape: handles whitespace variants (</script >, </script\t>) and HTML comments
 - Input sanitization: all user inputs are validated before use
 - HTML escaping: proper escaping for HTML, JavaScript, and CSS contexts
+- File size limits: prevents DoS via large file uploads (50MB markdown, 10MB vendor JS)
+- Unicode handling: proper byte-count filename truncation, Unicode line separator escaping
 
 Bug fixes applied:
 - Math rendering: protect math expressions ($...$, $$...$$) from Markdown parser
@@ -17,6 +23,7 @@ Bug fixes applied:
 - Filename sanitization: case-insensitive .html extension detection prevents double extensions
 - SUMMARY.md parsing: supports unlimited nesting levels (was limited to 10)
 - SUMMARY.md parsing: correctly parses paths containing parentheses
+- SUMMARY.md parsing: handles tab indentation (expands tabs to 4 spaces)
 - Chapter headings: caps at H6 (was generating invalid H7+ for deeply nested chapters)
 - H1 removal: correctly removes H1 even when preceded by blank lines in chapter files
 """
@@ -36,7 +43,7 @@ except ImportError:
         toml = None
 
 # ---------- App config ----------
-APP_TITLE = "Markdown -> Offline HTML"
+APP_TITLE = "Markdown Converter"
 # Resolve paths relative to the script file (Fix: fragile relative paths)
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
 VENDOR_DIR = os.path.join(APP_DIR, "vendor")
@@ -46,11 +53,20 @@ HIGHLIGHT_FILE = "highlight.min.js"
 KATEX_JS_FILE = "katex.min.js"
 KATEX_CSS_FILE = "katex.min.css"
 
+# File size limits to prevent denial of service
+MAX_MARKDOWN_SIZE = 50 * 1024 * 1024  # 50 MB
+MAX_VENDOR_JS_SIZE = 10 * 1024 * 1024  # 10 MB
+
 # ---------- Helpers ----------
 @st.cache_data
-def read_text_file(path: str) -> str:
-    """Read text file with error handling."""
+def read_text_file(path: str, max_size: int = MAX_VENDOR_JS_SIZE) -> str:
+    """Read text file with error handling and size limit."""
     try:
+        # Check file size before reading to prevent memory exhaustion
+        file_size = os.path.getsize(path)
+        if file_size > max_size:
+            st.error(f"File too large: {path} ({file_size} bytes, max {max_size})")
+            st.stop()
         with open(path, "r", encoding="utf-8") as f:
             return f.read()
     except OSError as e:
@@ -140,6 +156,9 @@ def escape_js_string(s: str) -> str:
              .replace("\n", "\\n")
              .replace("\r", "\\r")
              .replace("\t", "\\t")
+             # Escape Unicode line terminators (valid in JSON but break JS strings)
+             .replace("\u2028", "\\u2028")
+             .replace("\u2029", "\\u2029")
              .replace("</script>", "<\\/script>"))
 
 def escape_for_script_tag(s: str) -> str:
@@ -195,7 +214,10 @@ def sanitize_filename(name: str) -> str:
     # Extract base name and truncate to leave room for .html extension
     # Use case-insensitive check for .html extension to avoid double extensions
     base = name[:-5] if name.lower().endswith('.html') else name
-    base = base[:250]  # 250 + 5 (.html) = 255 max
+    # Truncate by BYTE count, not character count (for Unicode safety)
+    # Most filesystems have 255 byte limit, so use 250 bytes for base + 5 for .html
+    while len(base.encode('utf-8')) > 250:
+        base = base[:-1]
     return base + '.html'
 
 def sanitize_for_html_comment(text: str) -> str:
@@ -332,7 +354,10 @@ def parse_summary_md(summary_path: str) -> List[Chapter]:
                     if path_end > 0:
                         path = remaining[:path_end]
 
-        level = len(indent) // 2  # Assuming 2 spaces per level
+        # Calculate indentation level handling both spaces and tabs
+        # Expand tabs to 4 spaces (common convention) then divide by 2
+        expanded_indent = indent.replace('\t', '    ')  # Tab = 4 spaces
+        level = len(expanded_indent) // 2  # 2 spaces per level
         # Cap the level to prevent excessive nesting
         level = min(level, max_level)
         is_draft = not path.strip()
@@ -1365,7 +1390,7 @@ def build_html(
 # ---------- Streamlit UI ----------
 st.set_page_config(page_title=APP_TITLE, layout="wide")
 st.title(APP_TITLE)
-st.caption("Build a single, offline HTML from Markdown using Marked.js and DOMPurify. Includes syntax highlighting, math rendering, multiple themes, ToC, collapsible sections, and in-page search. Now supports mdBook projects!")
+st.caption("Convert Markdown to HTML (offline) or DOCX (Word). Features: syntax highlighting, math rendering, multiple themes, ToC, collapsible sections, search. Supports mdBook projects!")
 
 # Mode selection
 mode = st.radio(
@@ -1492,16 +1517,40 @@ content_width_value = content_width_map.get(content_width, "900px")
 
 st.divider()
 
+# Import DOCX conversion module (optional dependency)
+try:
+    from md_converter import check_docx_dependencies, convert_markdown_to_docx, sanitize_filename_for_format
+    docx_available, docx_error = check_docx_dependencies()
+except ImportError:
+    docx_available = False
+    docx_error = "md_converter module not found"
+
 build_col, preview_col = st.columns([1, 3], gap="large")
 with build_col:
-    st.subheader("Build")
-    if st.button("Build HTML", type="primary", use_container_width=True):
+    st.subheader("Build & Export")
+
+    # Output format selection
+    export_formats = ["HTML (Offline)"]
+    if docx_available:
+        export_formats.append("DOCX (Word)")
+    else:
+        export_formats.append("DOCX (unavailable)")
+
+    export_format = st.radio(
+        "Export Format",
+        export_formats,
+        horizontal=True,
+        help="HTML creates a standalone offline file with all features. DOCX requires pandoc."
+    )
+
+    if export_format == "DOCX (unavailable)":
+        st.warning(f"DOCX export unavailable: {docx_error}")
+
+    if st.button("Build", type="primary", use_container_width=True):
         if not md_text.strip():
             st.warning("Provide Markdown via upload, paste, or mdBook project path.")
         else:
             try:
-                vendor_libs = load_vendor_js(use_highlight=highlight_enabled, use_katex=katex_enabled)
-
                 # Determine title based on mode
                 if mode == "mdBook Project" and book_config:
                     final_title = book_config.get("book", {}).get("title", "Book")
@@ -1512,47 +1561,77 @@ with build_col:
                     if match:
                         final_title = match.group(1).strip()
 
-                meta = {
-                    "title": final_title,
-                    "doctype": "",
-                    "version": "1.0",
-                    "date": "",
-                    "authors": "",
-                    "summary": ""
-                }
+                if export_format == "HTML (Offline)":
+                    vendor_libs = load_vendor_js(use_highlight=highlight_enabled, use_katex=katex_enabled)
 
-                html = build_html(
-                    md_text, meta, vendor_libs,
-                    toc_mode, toc_levels, back_to_top, search_enabled,
-                    collapsible_mode, start_collapsed,
-                    theme_preset_value, highlight_enabled, highlight_theme, katex_enabled,
-                    line_numbers, base_font_size_value, content_width_value
-                )
+                    meta = {
+                        "title": final_title,
+                        "doctype": "",
+                        "version": "1.0",
+                        "date": "",
+                        "authors": "",
+                        "summary": ""
+                    }
 
-                # Determine default filename
-                if mode == "mdBook Project":
-                    default_name = sanitize_filename(final_title)
-                elif uploaded_filename:
-                    default_name = uploaded_filename.rsplit('.', 1)[0] + '.html'
-                else:
-                    default_name = sanitize_filename(final_title)
+                    html = build_html(
+                        md_text, meta, vendor_libs,
+                        toc_mode, toc_levels, back_to_top, search_enabled,
+                        collapsible_mode, start_collapsed,
+                        theme_preset_value, highlight_enabled, highlight_theme, katex_enabled,
+                        line_numbers, base_font_size_value, content_width_value
+                    )
 
-                # Store result in session state (Fix: disappearing download button)
-                st.session_state["generated_html"] = html
-                st.session_state["generated_name"] = default_name
-                st.session_state["last_html"] = html
-                st.success("HTML built successfully!")
+                    # Determine default filename
+                    if mode == "mdBook Project":
+                        default_name = sanitize_filename(final_title)
+                    elif uploaded_filename:
+                        default_name = uploaded_filename.rsplit('.', 1)[0] + '.html'
+                    else:
+                        default_name = sanitize_filename(final_title)
+
+                    # Store result in session state
+                    st.session_state["generated_html"] = html
+                    st.session_state["generated_name"] = default_name
+                    st.session_state["last_html"] = html
+                    st.session_state["generated_docx"] = None
+                    st.success("HTML built successfully!")
+
+                elif export_format == "DOCX (Word)" and docx_available:
+                    docx_bytes = convert_markdown_to_docx(md_text)
+
+                    # Determine default filename
+                    if mode == "mdBook Project":
+                        default_name = sanitize_filename_for_format(final_title, '.docx')
+                    elif uploaded_filename:
+                        default_name = uploaded_filename.rsplit('.', 1)[0] + '.docx'
+                    else:
+                        default_name = sanitize_filename_for_format(final_title, '.docx')
+
+                    # Store result in session state
+                    st.session_state["generated_docx"] = docx_bytes
+                    st.session_state["generated_docx_name"] = default_name
+                    st.session_state["generated_html"] = None
+                    st.success("DOCX built successfully!")
+
             except Exception as e:
                 st.error(f"Build failed: {e}")
 
-    # Render download button outside the if block using session state
-    # This ensures the button persists after clicking download
-    if "generated_html" in st.session_state:
+    # Render download buttons from session state
+    if st.session_state.get("generated_html"):
         st.download_button(
             "Download offline HTML",
             data=st.session_state["generated_html"].encode("utf-8"),
             file_name=st.session_state.get("generated_name", "document.html"),
             mime="text/html",
+            use_container_width=True
+        )
+
+    if st.session_state.get("generated_docx"):
+        st.download_button(
+            "Download DOCX",
+            data=st.session_state["generated_docx"],
+            file_name=st.session_state.get("generated_docx_name", "document.docx"),
+            mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
             use_container_width=True
         )
 

@@ -895,5 +895,121 @@ class TestValidateProjectPathSymlink(unittest.TestCase):
             os.rmdir(temp_dir)
 
 
+class TestTabIndentation(unittest.TestCase):
+    """Test tab indentation handling in parse_summary_md."""
+
+    def test_tab_indentation(self):
+        """Test that tab characters are handled correctly."""
+        import tempfile
+        import os
+
+        # Use tabs for indentation (1 tab = 4 spaces = 2 levels)
+        summary = """# Summary
+
+- [Level 0](l0.md)
+\t- [Level 2](l2.md)
+\t\t- [Level 4](l4.md)
+"""
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.md', delete=False) as f:
+            f.write(summary)
+            temp_path = f.name
+
+        try:
+            chapters = md_to_html.parse_summary_md(temp_path)
+            levels = [c.level for c in chapters if c.path]
+            # 1 tab = 4 spaces = 2 levels
+            self.assertEqual(levels, [0, 2, 4])
+        finally:
+            os.unlink(temp_path)
+
+    def test_mixed_tabs_and_spaces(self):
+        """Test mixed tab and space indentation."""
+        import tempfile
+        import os
+
+        # Mix tabs and spaces
+        summary = """# Summary
+
+- [Level 0](l0.md)
+  - [Level 1](l1.md)
+\t- [Level 2](l2.md)
+"""
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.md', delete=False) as f:
+            f.write(summary)
+            temp_path = f.name
+
+        try:
+            chapters = md_to_html.parse_summary_md(temp_path)
+            levels = [c.level for c in chapters if c.path]
+            self.assertEqual(levels, [0, 1, 2])
+        finally:
+            os.unlink(temp_path)
+
+
+class TestUnicodeEscaping(unittest.TestCase):
+    """Test Unicode line separator escaping."""
+
+    def test_escape_line_separator(self):
+        """Test U+2028 LINE SEPARATOR is escaped."""
+        result = md_to_html.escape_js_string("test\u2028line")
+        self.assertIn("\\u2028", result)
+        self.assertNotIn("\u2028", result)
+
+    def test_escape_paragraph_separator(self):
+        """Test U+2029 PARAGRAPH SEPARATOR is escaped."""
+        result = md_to_html.escape_js_string("test\u2029para")
+        self.assertIn("\\u2029", result)
+        self.assertNotIn("\u2029", result)
+
+    def test_escape_combined(self):
+        """Test both separators together."""
+        result = md_to_html.escape_js_string("a\u2028b\u2029c")
+        self.assertIn("\\u2028", result)
+        self.assertIn("\\u2029", result)
+
+
+class TestByteCountTruncation(unittest.TestCase):
+    """Test filename truncation by byte count for Unicode safety."""
+
+    def test_ascii_truncation(self):
+        """Test ASCII filename truncation works."""
+        long_name = "a" * 300
+        result = md_to_html.sanitize_filename(long_name)
+        # Should be 250 bytes + 5 bytes (.html) = 255 bytes max
+        self.assertLessEqual(len(result.encode('utf-8')), 255)
+        self.assertTrue(result.endswith('.html'))
+
+    def test_unicode_truncation(self):
+        """Test Unicode filename truncation respects byte limits."""
+        # Each emoji is 4 bytes in UTF-8
+        emoji_name = "📄" * 100  # 400 bytes of emoji
+        result = md_to_html.sanitize_filename(emoji_name)
+        # Should be truncated to fit within 255 bytes
+        self.assertLessEqual(len(result.encode('utf-8')), 255)
+        self.assertTrue(result.endswith('.html'))
+
+    def test_cjk_truncation(self):
+        """Test CJK character truncation respects byte limits."""
+        # Each CJK character is 3 bytes in UTF-8
+        cjk_name = "文" * 100  # 300 bytes of CJK
+        result = md_to_html.sanitize_filename(cjk_name)
+        self.assertLessEqual(len(result.encode('utf-8')), 255)
+        self.assertTrue(result.endswith('.html'))
+
+
+class TestFileSizeLimits(unittest.TestCase):
+    """Test file size limit constants are defined."""
+
+    def test_max_markdown_size_defined(self):
+        """Test MAX_MARKDOWN_SIZE constant exists."""
+        self.assertTrue(hasattr(md_to_html, 'MAX_MARKDOWN_SIZE'))
+        self.assertGreater(md_to_html.MAX_MARKDOWN_SIZE, 0)
+
+    def test_max_vendor_js_size_defined(self):
+        """Test MAX_VENDOR_JS_SIZE constant exists."""
+        self.assertTrue(hasattr(md_to_html, 'MAX_VENDOR_JS_SIZE'))
+        self.assertGreater(md_to_html.MAX_VENDOR_JS_SIZE, 0)
+
+
 if __name__ == "__main__":
     unittest.main()
