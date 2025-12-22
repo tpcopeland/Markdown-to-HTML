@@ -1396,7 +1396,7 @@ def build_html(
 # ---------- Streamlit UI ----------
 st.set_page_config(page_title=APP_TITLE, layout="wide")
 st.title(APP_TITLE)
-st.caption("Convert Markdown to HTML (offline) or DOCX (Word). Features: syntax highlighting, math rendering, multiple themes, ToC, collapsible sections, search. Supports mdBook projects!")
+st.caption("Convert Markdown to HTML or DOCX. Features: syntax highlighting, math rendering, multiple themes, ToC, collapsible sections. Supports mdBook projects!")
 
 # Mode selection
 mode = st.radio(
@@ -1412,7 +1412,7 @@ book_config = None
 chapter_metadata = []
 
 with st.container(border=True):
-    st.subheader("Source")
+    st.subheader("1. Source")
 
     if mode == "Single Markdown File":
         uploaded = st.file_uploader("Upload a .md file", type=["md", "markdown"])
@@ -1449,81 +1449,7 @@ with st.container(border=True):
 
 st.divider()
 
-with st.container(border=True):
-    st.subheader("Options")
-
-    # Theme and appearance
-    col1, col2 = st.columns([1, 1], gap="medium")
-    with col1:
-        theme_preset = st.selectbox(
-            "Output Theme",
-            ["Default", "GitHub", "Academic", "Minimal", "Dark"],
-            index=0,
-            help="Choose an overall theme for the generated HTML"
-        )
-        base_font_size = st.selectbox(
-            "Base Font Size",
-            ["Small (90%)", "Normal (100%)", "Large (110%)", "X-Large (125%)"],
-            index=1,
-            help="Adjust the base font size for readability"
-        )
-    with col2:
-        content_width = st.selectbox(
-            "Content Width",
-            ["Narrow (700px)", "Normal (900px)", "Wide (1200px)", "Full (95vw)"],
-            index=1,
-            help="Maximum width of main content area"
-        )
-        search_enabled = st.toggle("Enable in-page search with highlight", value=True)
-
-    st.divider()
-
-    # Document structure
-    col1, col2, col3 = st.columns([2, 2, 2], gap="large")
-    with col1:
-        toc_choice = st.radio("ToC placement", ["Top", "Sidebar (collapsible)", "None"], index=1, horizontal=True)
-        back_to_top = st.toggle("Add Back to top link at end of each section", value=True)
-    with col2:
-        toc_levels_choice = st.radio("ToC heading levels", ["H2 only", "H2-H3", "H2-H3-H4"], index=0, horizontal=True)
-        collapsible_choice = st.radio("Collapsible sections", ["None", "H2", "H2+H3"], index=2, horizontal=True)
-    with col3:
-        start_collapsed = st.toggle("Start sections collapsed", value=True, disabled=(collapsible_choice == "None"))
-
-    st.divider()
-
-    # Code and Math features
-    col1, col2 = st.columns([1, 1], gap="medium")
-    with col1:
-        highlight_enabled = st.toggle("Enable syntax highlighting", value=True, help="Highlight code blocks with color syntax")
-        highlight_theme = st.selectbox(
-            "Syntax theme",
-            ["github-light", "github-dark", "monokai", "atom-one-dark"],
-            index=0,
-            disabled=not highlight_enabled,
-            help="Color theme for syntax highlighting"
-        )
-        line_numbers = st.toggle("Show line numbers in code blocks", value=False, help="Display line numbers on the left side of code blocks")
-    with col2:
-        katex_enabled = st.toggle("Enable Math/LaTeX rendering", value=True, help="Render $...$ and $$...$$ as mathematical equations")
-
-# Map UI choices to internal values
-toc_mode_map = {"Top": "top", "Sidebar (collapsible)": "sidebar", "None": "none"}
-toc_levels_map = {"H2 only": "h2", "H2-H3": "h2h3", "H2-H3-H4": "h2h3h4"}
-collapsible_mode_map = {"None": "none", "H2": "h2", "H2+H3": "h2h3"}
-theme_preset_map = {"Default": "default", "GitHub": "github", "Academic": "academic", "Minimal": "minimal", "Dark": "dark"}
-font_size_map = {"Small (90%)": "90%", "Normal (100%)": "100%", "Large (110%)": "110%", "X-Large (125%)": "125%"}
-content_width_map = {"Narrow (700px)": "700px", "Normal (900px)": "900px", "Wide (1200px)": "1200px", "Full (95vw)": "95vw"}
-
-toc_mode = toc_mode_map.get(toc_choice, "none")
-toc_levels = toc_levels_map.get(toc_levels_choice, "h2")
-collapsible_mode = collapsible_mode_map.get(collapsible_choice, "none")
-theme_preset_value = theme_preset_map.get(theme_preset, "default")
-base_font_size_value = font_size_map.get(base_font_size, "100%")
-content_width_value = content_width_map.get(content_width, "900px")
-
-st.divider()
-
-# Import DOCX conversion module (optional dependency)
+# Import DOCX conversion module
 try:
     from md_converter import check_docx_dependencies, convert_markdown_to_docx, sanitize_filename_for_format
     docx_available, docx_error = check_docx_dependencies()
@@ -1531,30 +1457,164 @@ except ImportError:
     docx_available = False
     docx_error = "md_converter module not found"
 
+# Export format selection - MOVED UP
+with st.container(border=True):
+    st.subheader("2. Export Format")
+
+    format_col1, format_col2 = st.columns(2)
+    with format_col1:
+        export_format = st.radio(
+            "Choose format",
+            ["HTML (Offline)", "DOCX (Word)"],
+            horizontal=True,
+            help="HTML: standalone offline file with interactive features. DOCX: Word document for editing/printing."
+        )
+
+    if export_format == "DOCX (Word)" and not docx_available:
+        st.error(f"DOCX export unavailable: {docx_error}")
+
+st.divider()
+
+# Format-specific options
+with st.container(border=True):
+    st.subheader("3. Options")
+
+    if export_format == "HTML (Offline)":
+        # ----- HTML OPTIONS -----
+        st.markdown("**Theme & Appearance**")
+        col1, col2 = st.columns([1, 1], gap="medium")
+        with col1:
+            theme_preset = st.selectbox(
+                "Output Theme",
+                ["Default", "GitHub", "Academic", "Minimal", "Dark"],
+                index=0,
+                help="Choose an overall theme for the generated HTML"
+            )
+            base_font_size = st.selectbox(
+                "Base Font Size",
+                ["Small (90%)", "Normal (100%)", "Large (110%)", "X-Large (125%)"],
+                index=1,
+                help="Adjust the base font size for readability"
+            )
+        with col2:
+            content_width = st.selectbox(
+                "Content Width",
+                ["Narrow (700px)", "Normal (900px)", "Wide (1200px)", "Full (95vw)"],
+                index=1,
+                help="Maximum width of main content area"
+            )
+            search_enabled = st.toggle("Enable in-page search", value=True)
+
+        st.divider()
+
+        st.markdown("**Document Structure**")
+        col1, col2, col3 = st.columns([2, 2, 2], gap="large")
+        with col1:
+            toc_choice = st.radio("ToC placement", ["Top", "Sidebar", "None"], index=1, horizontal=True)
+            back_to_top = st.toggle("Back to top links", value=True)
+        with col2:
+            toc_levels_choice = st.radio("ToC levels", ["H2", "H2-H3", "H2-H3-H4"], index=0, horizontal=True)
+            collapsible_choice = st.radio("Collapsible sections", ["None", "H2", "H2+H3"], index=2, horizontal=True)
+        with col3:
+            start_collapsed = st.toggle("Start collapsed", value=True, disabled=(collapsible_choice == "None"))
+
+        st.divider()
+
+        st.markdown("**Code & Math**")
+        col1, col2 = st.columns([1, 1], gap="medium")
+        with col1:
+            highlight_enabled = st.toggle("Syntax highlighting", value=True)
+            highlight_theme = st.selectbox(
+                "Syntax theme",
+                ["github-light", "github-dark", "monokai", "atom-one-dark"],
+                index=0,
+                disabled=not highlight_enabled
+            )
+            line_numbers = st.toggle("Line numbers in code", value=False)
+        with col2:
+            katex_enabled = st.toggle("Math/LaTeX rendering", value=True, help="Render $...$ and $$...$$ as equations")
+
+        # Map UI choices to internal values
+        toc_mode_map = {"Top": "top", "Sidebar": "sidebar", "None": "none"}
+        toc_levels_map = {"H2": "h2", "H2-H3": "h2h3", "H2-H3-H4": "h2h3h4"}
+        collapsible_mode_map = {"None": "none", "H2": "h2", "H2+H3": "h2h3"}
+        theme_preset_map = {"Default": "default", "GitHub": "github", "Academic": "academic", "Minimal": "minimal", "Dark": "dark"}
+        font_size_map = {"Small (90%)": "90%", "Normal (100%)": "100%", "Large (110%)": "110%", "X-Large (125%)": "125%"}
+        content_width_map = {"Narrow (700px)": "700px", "Normal (900px)": "900px", "Wide (1200px)": "1200px", "Full (95vw)": "95vw"}
+
+        toc_mode = toc_mode_map.get(toc_choice, "none")
+        toc_levels = toc_levels_map.get(toc_levels_choice, "h2")
+        collapsible_mode = collapsible_mode_map.get(collapsible_choice, "none")
+        theme_preset_value = theme_preset_map.get(theme_preset, "default")
+        base_font_size_value = font_size_map.get(base_font_size, "100%")
+        content_width_value = content_width_map.get(content_width, "900px")
+
+    else:
+        # ----- DOCX OPTIONS -----
+        st.markdown("**Document Settings**")
+        col1, col2 = st.columns([1, 1], gap="medium")
+        with col1:
+            docx_toc = st.toggle("Include Table of Contents", value=True, help="Add a ToC at the beginning of the document")
+            docx_toc_depth = st.selectbox(
+                "ToC Depth",
+                ["1 level", "2 levels", "3 levels"],
+                index=1,
+                disabled=not docx_toc,
+                help="How many heading levels to include in ToC"
+            )
+        with col2:
+            docx_highlight = st.selectbox(
+                "Code Highlighting Style",
+                ["pygments", "tango", "espresso", "zenburn", "kate", "monochrome", "breezedark", "haddock"],
+                index=0,
+                help="Syntax highlighting style for code blocks"
+            )
+
+        st.divider()
+
+        st.markdown("**Typography**")
+        col1, col2 = st.columns([1, 1], gap="medium")
+        with col1:
+            docx_font = st.selectbox(
+                "Body Font",
+                ["Default (Calibri)", "Times New Roman", "Arial", "Georgia", "Cambria"],
+                index=0,
+                help="Main document font (requires font installed on system)"
+            )
+        with col2:
+            docx_font_size = st.selectbox(
+                "Font Size",
+                ["10pt", "11pt", "12pt", "14pt"],
+                index=1,
+                help="Base font size for body text"
+            )
+
+        # Set defaults for HTML options (not used but needed for variable scope)
+        toc_mode = "none"
+        toc_levels = "h2"
+        collapsible_mode = "none"
+        theme_preset_value = "default"
+        base_font_size_value = "100%"
+        content_width_value = "900px"
+        search_enabled = False
+        back_to_top = False
+        start_collapsed = False
+        highlight_enabled = False
+        highlight_theme = "github-light"
+        line_numbers = False
+        katex_enabled = False
+
+st.divider()
+
 build_col, preview_col = st.columns([1, 3], gap="large")
 with build_col:
-    st.subheader("Build & Export")
-
-    # Output format selection
-    export_formats = ["HTML (Offline)"]
-    if docx_available:
-        export_formats.append("DOCX (Word)")
-    else:
-        export_formats.append("DOCX (unavailable)")
-
-    export_format = st.radio(
-        "Export Format",
-        export_formats,
-        horizontal=True,
-        help="HTML creates a standalone offline file with all features. DOCX requires pandoc."
-    )
-
-    if export_format == "DOCX (unavailable)":
-        st.warning(f"DOCX export unavailable: {docx_error}")
+    st.subheader("4. Build & Export")
 
     if st.button("Build", type="primary", use_container_width=True):
         if not md_text.strip():
             st.warning("Provide Markdown via upload, paste, or mdBook project path.")
+        elif export_format == "DOCX (Word)" and not docx_available:
+            st.error(f"DOCX export unavailable: {docx_error}")
         else:
             try:
                 # Determine title based on mode
@@ -1602,8 +1662,33 @@ with build_col:
                     st.session_state["generated_docx"] = None
                     st.success("HTML built successfully!")
 
-                elif export_format == "DOCX (Word)" and docx_available:
-                    docx_bytes = convert_markdown_to_docx(md_text)
+                elif export_format == "DOCX (Word)":
+                    # Build extra args for pandoc based on options
+                    extra_args = ["--standalone", f"--highlight-style={docx_highlight}", "--dpi=96"]
+
+                    if docx_toc:
+                        extra_args.append("--toc")
+                        toc_depth_val = {"1 level": 1, "2 levels": 2, "3 levels": 3}.get(docx_toc_depth, 2)
+                        extra_args.append(f"--toc-depth={toc_depth_val}")
+
+                    # Font settings via variables
+                    font_map = {
+                        "Default (Calibri)": "Calibri",
+                        "Times New Roman": "Times New Roman",
+                        "Arial": "Arial",
+                        "Georgia": "Georgia",
+                        "Cambria": "Cambria"
+                    }
+                    font_name = font_map.get(docx_font, "Calibri")
+                    font_size_val = docx_font_size.replace("pt", "")
+
+                    # Pass options to converter
+                    docx_bytes = convert_markdown_to_docx(
+                        md_text,
+                        extra_args=extra_args,
+                        font_name=font_name,
+                        font_size=font_size_val
+                    )
 
                     # Determine default filename
                     if mode == "mdBook Project":
@@ -1617,6 +1702,7 @@ with build_col:
                     st.session_state["generated_docx"] = docx_bytes
                     st.session_state["generated_docx_name"] = default_name
                     st.session_state["generated_html"] = None
+                    st.session_state["last_html"] = None
                     st.success("DOCX built successfully!")
 
             except Exception as e:
@@ -1625,7 +1711,7 @@ with build_col:
     # Render download buttons from session state
     if st.session_state.get("generated_html"):
         st.download_button(
-            "Download offline HTML",
+            "Download HTML",
             data=st.session_state["generated_html"].encode("utf-8"),
             file_name=st.session_state.get("generated_name", "document.html"),
             mime="text/html",
@@ -1643,7 +1729,9 @@ with build_col:
 
 with preview_col:
     st.subheader("Preview")
-    if "last_html" in st.session_state:
+    if st.session_state.get("last_html"):
         st.components.v1.html(st.session_state["last_html"], height=650, scrolling=True)
+    elif st.session_state.get("generated_docx"):
+        st.info("DOCX preview not available. Download the file to view it.")
     else:
-        st.info("Build to see a live preview here.")
+        st.info("Build to see a preview here.")
