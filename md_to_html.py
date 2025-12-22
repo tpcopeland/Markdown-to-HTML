@@ -74,14 +74,20 @@ def read_text_file(path: str, max_size: int = MAX_VENDOR_JS_SIZE) -> str:
         st.stop()
 
 def validate_vendor_path(base_dir: str, filename: str) -> str:
-    """Validate and resolve vendor file path to prevent traversal."""
+    """Validate and resolve vendor file path to prevent traversal.
+
+    Uses realpath() to resolve symlinks, preventing symlink-based attacks
+    where a symlink in the vendor directory points to files outside it.
+    """
     # Require filename to start with alphanumeric (not dot) to prevent access to hidden files
     if not re.match(r'^[a-zA-Z0-9][a-zA-Z0-9._-]*$', filename):
         st.error(f"Invalid filename: {filename}")
         st.stop()
     path = os.path.join(base_dir, filename)
-    resolved = os.path.abspath(path)
-    base_resolved = os.path.abspath(base_dir)
+    # Use realpath to resolve both symlinks and relative paths
+    # This prevents attacks using symlinks that point outside the vendor directory
+    resolved = os.path.realpath(path)
+    base_resolved = os.path.realpath(base_dir)
     # Use os.sep to ensure we're checking full directory components
     # This prevents /home/user from matching /home/username
     if not (resolved.startswith(base_resolved + os.sep) or resolved == base_resolved):
