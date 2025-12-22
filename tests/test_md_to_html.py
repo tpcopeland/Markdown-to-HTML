@@ -599,5 +599,301 @@ class TestSanitizeCssSize(unittest.TestCase):
         self.assertEqual(md_to_html.sanitize_css_size("", "50px"), "50px")
 
 
+class TestSymlinkProtection(unittest.TestCase):
+    """Test symlink protection in safe_read_file."""
+
+    def test_symlink_outside_base_blocked(self):
+        """Test that symlinks pointing outside base directory are blocked."""
+        import tempfile
+        import os
+
+        # Create temp directory structure
+        base_dir = tempfile.mkdtemp()
+        secret_file = tempfile.NamedTemporaryFile(mode='w', delete=False, dir='/tmp')
+        secret_file.write('SECRET_DATA')
+        secret_file.close()
+
+        # Create symlink inside base_dir pointing to secret file
+        symlink_path = os.path.join(base_dir, 'symlink.md')
+        os.symlink(secret_file.name, symlink_path)
+
+        try:
+            # This should raise ValueError because symlink resolves outside base
+            with self.assertRaises(ValueError) as context:
+                md_to_html.safe_read_file(base_dir, 'symlink.md')
+            self.assertIn("Security violation", str(context.exception))
+        finally:
+            os.unlink(symlink_path)
+            os.unlink(secret_file.name)
+            os.rmdir(base_dir)
+
+    def test_regular_file_inside_base_allowed(self):
+        """Test that regular files inside base directory are allowed."""
+        import tempfile
+        import os
+
+        base_dir = tempfile.mkdtemp()
+        test_file = os.path.join(base_dir, 'test.md')
+        with open(test_file, 'w') as f:
+            f.write('test content')
+
+        try:
+            content = md_to_html.safe_read_file(base_dir, 'test.md')
+            self.assertEqual(content, 'test content')
+        finally:
+            os.unlink(test_file)
+            os.rmdir(base_dir)
+
+
+class TestScriptTagEscapeBypass(unittest.TestCase):
+    """Test script tag escape with whitespace variants."""
+
+    def test_escape_script_with_space(self):
+        """Test escaping </script > with trailing space."""
+        result = md_to_html.escape_for_script_tag("</script >")
+        self.assertNotIn("</script", result.lower())
+
+    def test_escape_script_with_tab(self):
+        """Test escaping </script\t> with tab."""
+        result = md_to_html.escape_for_script_tag("</script\t>")
+        self.assertNotIn("</script", result.lower())
+
+    def test_escape_script_with_newline(self):
+        """Test escaping </script\n> with newline."""
+        result = md_to_html.escape_for_script_tag("</script\n>")
+        self.assertNotIn("</script", result.lower())
+
+    def test_escape_html_comment(self):
+        """Test escaping HTML comments which could break script context."""
+        result = md_to_html.escape_for_script_tag("<!--comment-->")
+        self.assertNotIn("<!--", result)
+
+    def test_escape_multiple_variants(self):
+        """Test escaping multiple script tag variants in one string."""
+        input_str = "a</script>b</SCRIPT >c</script\t>d"
+        result = md_to_html.escape_for_script_tag(input_str)
+        self.assertNotIn("</script>", result.lower())
+        self.assertNotIn("</script ", result.lower())
+
+
+class TestSanitizeFilenameCaseSensitivity(unittest.TestCase):
+    """Test case-insensitive handling of .html extension."""
+
+    def test_uppercase_html_extension(self):
+        """Test that .HTML extension is recognized."""
+        self.assertEqual(md_to_html.sanitize_filename("test.HTML"), "test.html")
+
+    def test_mixed_case_html_extension(self):
+        """Test that .Html extension is recognized."""
+        self.assertEqual(md_to_html.sanitize_filename("test.Html"), "test.html")
+
+    def test_lowercase_html_extension(self):
+        """Test that .html extension is recognized."""
+        self.assertEqual(md_to_html.sanitize_filename("test.html"), "test.html")
+
+    def test_no_double_extension(self):
+        """Test that we don't get double .html extensions."""
+        result = md_to_html.sanitize_filename("document.HTML")
+        self.assertEqual(result.count('.html'), 1)
+
+
+class TestDeepNestingParsing(unittest.TestCase):
+    """Test parsing of deeply nested SUMMARY.md files."""
+
+    def test_more_than_10_levels(self):
+        """Test parsing with more than 10 nesting levels doesn't crash."""
+        import tempfile
+        import os
+
+        # Create deeply nested summary
+        lines = ["# Summary\n"]
+        for i in range(15):  # 15 levels deep
+            indent = "  " * i
+            lines.append(f"{indent}- [Level {i}](l{i}.md)\n")
+
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.md', delete=False) as f:
+            f.writelines(lines)
+            temp_path = f.name
+
+        try:
+            # This should not raise IndexError
+            chapters = md_to_html.parse_summary_md(temp_path)
+            self.assertEqual(len(chapters), 15)
+            # Verify deepest chapter has correct level
+            self.assertEqual(chapters[-1].level, 14)
+        finally:
+            os.unlink(temp_path)
+
+    def test_chapter_numbering_deep_nesting(self):
+        """Test chapter numbering works correctly with deep nesting."""
+        import tempfile
+        import os
+
+        summary = """# Summary
+
+- [Ch 1](c1.md)
+  - [Ch 1.1](c11.md)
+    - [Ch 1.1.1](c111.md)
+- [Ch 2](c2.md)
+  - [Ch 2.1](c21.md)
+"""
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.md', delete=False) as f:
+            f.write(summary)
+            temp_path = f.name
+
+        try:
+            chapters = md_to_html.parse_summary_md(temp_path)
+            numbers = [c.number for c in chapters if c.number]
+            self.assertEqual(numbers, ['1', '1.1', '1.1.1', '2', '2.1'])
+        finally:
+            os.unlink(temp_path)
+
+
+class TestPathWithParentheses(unittest.TestCase):
+    """Test parsing paths that contain parentheses."""
+
+    def test_path_with_parentheses(self):
+        """Test that paths with parentheses are parsed correctly."""
+        import tempfile
+        import os
+
+        summary = """# Summary
+
+- [Chapter](path(with)parens.md)
+"""
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.md', delete=False) as f:
+            f.write(summary)
+            temp_path = f.name
+
+        try:
+            chapters = md_to_html.parse_summary_md(temp_path)
+            chapter = [c for c in chapters if c.path][0]
+            self.assertEqual(chapter.path, "path(with)parens.md")
+        finally:
+            os.unlink(temp_path)
+
+    def test_path_with_nested_parentheses(self):
+        """Test that paths with nested parentheses are parsed correctly."""
+        import tempfile
+        import os
+
+        summary = """# Summary
+
+- [Chapter](path(with(nested))parens.md)
+"""
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.md', delete=False) as f:
+            f.write(summary)
+            temp_path = f.name
+
+        try:
+            chapters = md_to_html.parse_summary_md(temp_path)
+            chapter = [c for c in chapters if c.path][0]
+            self.assertEqual(chapter.path, "path(with(nested))parens.md")
+        finally:
+            os.unlink(temp_path)
+
+    def test_empty_path_draft(self):
+        """Test that empty paths are recognized as drafts."""
+        import tempfile
+        import os
+
+        summary = """# Summary
+
+- [Draft Chapter]()
+"""
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.md', delete=False) as f:
+            f.write(summary)
+            temp_path = f.name
+
+        try:
+            chapters = md_to_html.parse_summary_md(temp_path)
+            chapter = [c for c in chapters if not c.is_separator and not c.is_part_title][0]
+            self.assertTrue(chapter.is_draft)
+            self.assertIsNone(chapter.path)
+        finally:
+            os.unlink(temp_path)
+
+
+class TestCombineChaptersHeadingLevel(unittest.TestCase):
+    """Test that combine_chapters caps heading levels at H6."""
+
+    def test_deep_chapter_capped_at_h6(self):
+        """Test that deeply nested chapters don't exceed H6."""
+        # Create chapters with deep nesting
+        chapters = [
+            md_to_html.Chapter("L0", path="l0.md", level=0),
+            md_to_html.Chapter("L4", path="l4.md", level=4),  # Would be H6
+            md_to_html.Chapter("L5", path="l5.md", level=5),  # Would be H7 without cap
+            md_to_html.Chapter("L10", path="l10.md", level=10),  # Would be H12 without cap
+        ]
+
+        # Mock the file reading
+        with patch.object(md_to_html, 'read_markdown_file', return_value="Content here"):
+            combined, metadata = md_to_html.combine_chapters(chapters, "/fake/path")
+
+        # Check that heading levels are capped
+        self.assertIn("## L0", combined)  # Level 0 -> H2
+        self.assertIn("###### L4", combined)  # Level 4 -> H6
+        self.assertIn("###### L5", combined)  # Level 5 -> H6 (capped)
+        self.assertIn("###### L10", combined)  # Level 10 -> H6 (capped)
+
+        # Ensure no H7 or higher
+        self.assertNotIn("####### ", combined)
+
+
+class TestH1RemovalWithLeadingBlanks(unittest.TestCase):
+    """Test that H1 removal works when markdown has leading blank lines."""
+
+    def test_h1_removed_after_blank_lines(self):
+        """Test H1 is removed even if preceded by blank lines."""
+        chapter = md_to_html.Chapter("Test Chapter", path="test.md", level=0)
+
+        markdown_with_leading_blanks = "\n\n\n# Title to Remove\n\nActual content here."
+
+        with patch.object(md_to_html, 'read_markdown_file', return_value=markdown_with_leading_blanks):
+            combined, metadata = md_to_html.combine_chapters([chapter], "/fake/path")
+
+        # The original H1 should be removed
+        self.assertNotIn("# Title to Remove", combined)
+        # But the chapter heading should be there
+        self.assertIn("## Test Chapter", combined)
+        # And the content should be preserved
+        self.assertIn("Actual content here", combined)
+
+    def test_h1_not_removed_if_not_first(self):
+        """Test that H1 in the middle of content is not removed."""
+        chapter = md_to_html.Chapter("Test Chapter", path="test.md", level=0)
+
+        markdown_with_h1_later = "Some intro text.\n\n# Not First H1\n\nMore content."
+
+        with patch.object(md_to_html, 'read_markdown_file', return_value=markdown_with_h1_later):
+            combined, metadata = md_to_html.combine_chapters([chapter], "/fake/path")
+
+        # This H1 should NOT be removed because it's not the first non-blank line
+        self.assertIn("# Not First H1", combined)
+
+
+class TestValidateProjectPathSymlink(unittest.TestCase):
+    """Test that validate_project_path resolves symlinks."""
+
+    def test_symlink_to_sensitive_dir_blocked(self):
+        """Test that symlinks pointing to sensitive directories are blocked."""
+        import tempfile
+        import os
+
+        # Create a symlink pointing to /etc
+        temp_dir = tempfile.mkdtemp()
+        symlink_path = os.path.join(temp_dir, 'etc_link')
+
+        try:
+            os.symlink('/etc', symlink_path)
+            is_valid, error = md_to_html.validate_project_path(symlink_path)
+            self.assertFalse(is_valid)
+            self.assertIn("/etc", error)
+        finally:
+            os.unlink(symlink_path)
+            os.rmdir(temp_dir)
+
+
 if __name__ == "__main__":
     unittest.main()

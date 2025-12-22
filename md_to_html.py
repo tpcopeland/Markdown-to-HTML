@@ -4,8 +4,9 @@ Markdown to HTML Converter with Streamlit UI
 Security enhancements applied:
 - CSS injection prevention: validate base_font_size and content_width parameters
 - Path traversal prevention: filename validation rejects dotfiles and enforces alphanumeric start
-- Path traversal prevention: safe_read_file() ensures files are within base directory
-- Path traversal prevention: validate_project_path() blocks access to sensitive system directories
+- Path traversal prevention: safe_read_file() uses realpath() to resolve symlinks and block symlink attacks
+- Path traversal prevention: validate_project_path() resolves symlinks and blocks access to sensitive directories
+- Script tag escape: handles whitespace variants (</script >, </script\t>) and HTML comments
 - Input sanitization: all user inputs are validated before use
 - HTML escaping: proper escaping for HTML, JavaScript, and CSS contexts
 
@@ -13,6 +14,11 @@ Bug fixes applied:
 - Math rendering: protect math expressions ($...$, $$...$$) from Markdown parser
 - Download button: use session state to persist button across re-renders
 - Relative paths: resolve VENDOR_DIR relative to script location, not CWD
+- Filename sanitization: case-insensitive .html extension detection prevents double extensions
+- SUMMARY.md parsing: supports unlimited nesting levels (was limited to 10)
+- SUMMARY.md parsing: correctly parses paths containing parentheses
+- Chapter headings: caps at H6 (was generating invalid H7+ for deeply nested chapters)
+- H1 removal: correctly removes H1 even when preceded by blank lines in chapter files
 """
 import os
 import re
@@ -142,7 +148,12 @@ def escape_for_script_tag(s: str) -> str:
         return ""
     # Escape </script> case-insensitively to prevent HTML parser from closing the tag
     # HTML parsers are case-insensitive, so </SCRIPT>, </Script>, etc. would all close the tag
-    return re.sub(r'</script>', r'<\\/script>', s, flags=re.IGNORECASE)
+    # Also handle whitespace variants like </script >, </script\t>, </script\n>
+    # which some HTML parsers may accept as valid closing tags
+    s = re.sub(r'</script\s*>', r'<\\/script>', s, flags=re.IGNORECASE)
+    # Also escape HTML comment sequences which could break script context
+    s = s.replace('<!--', '<\\!--')
+    return s
 
 def validate_date(date_str: str) -> bool:
     """Validate ISO date format."""
@@ -182,7 +193,8 @@ def sanitize_filename(name: str) -> str:
     if not name:
         return "document.html"
     # Extract base name and truncate to leave room for .html extension
-    base = name[:-5] if name.endswith('.html') else name
+    # Use case-insensitive check for .html extension to avoid double extensions
+    base = name[:-5] if name.lower().endswith('.html') else name
     base = base[:250]  # 250 + 5 (.html) = 255 max
     return base + '.html'
 
@@ -201,18 +213,21 @@ def safe_read_file(base_dir: str, relative_path: str) -> str:
     """
     Safely read a file ensuring it is within the base directory.
     Prevents path traversal attacks (e.g., ../../../../etc/passwd).
+    Also prevents symlink attacks by resolving symbolic links.
     """
-    # Normalize and resolve both paths to absolute
-    base_abs = os.path.abspath(os.path.normpath(base_dir))
-    # Join and normalize the target path
-    target_abs = os.path.abspath(os.path.normpath(os.path.join(base_dir, relative_path)))
+    # Use realpath to resolve both symlinks and relative paths
+    # This prevents attacks using symlinks that point outside the base directory
+    base_real = os.path.realpath(os.path.normpath(base_dir))
+    # Join and normalize the target path, then resolve symlinks
+    target_path = os.path.join(base_dir, relative_path)
+    target_real = os.path.realpath(os.path.normpath(target_path))
 
     # Ensure the resolved target starts with the base directory
     # Use os.sep to ensure we're checking full directory components
-    if not (target_abs.startswith(base_abs + os.sep) or target_abs == base_abs):
+    if not (target_real.startswith(base_real + os.sep) or target_real == base_real):
         raise ValueError(f"Security violation: Path '{relative_path}' resolves outside base directory.")
 
-    with open(target_abs, "r", encoding="utf-8") as f:
+    with open(target_real, "r", encoding="utf-8") as f:
         return f.read()
 
 # ---------- mdBook Integration ----------
@@ -260,8 +275,10 @@ def parse_summary_md(summary_path: str) -> List[Chapter]:
 
     chapters = []
     lines = content.split('\n')
-    numbered_chapter_count = [0] * 10  # Support up to 10 levels of nesting
+    # Use a dict for dynamic nesting levels instead of fixed array
+    numbered_chapter_count: Dict[int, int] = {}
     in_numbered_section = False
+    max_level = 100  # Practical limit for nesting depth
 
     for line in lines:
         # Skip empty lines
@@ -276,41 +293,78 @@ def parse_summary_md(summary_path: str) -> List[Chapter]:
         # Check for part title (# Title)
         if line.strip().startswith('#'):
             title = line.strip().lstrip('#').strip()
-            if title.lower() != 'summary':  # Ignore the main "Summary" title
+            if title and title.lower() != 'summary':  # Ignore empty or "Summary" title
                 chapters.append(Chapter(title, is_part_title=True))
             continue
 
         # Check for chapter link: [Title](path) or [Title]()
-        link_match = re.match(r'^(\s*)([-*])\s+\[([^\]]+)\]\(([^)]*)\)\s*$', line)
-        if link_match:
+        # Use a more robust regex that handles special characters in paths
+        # Match: indent, bullet, [title](path) where path can contain parentheses
+        link_match = re.match(r'^(\s*)([-*])\s+\[([^\]]+)\]\((.+)\)\s*$', line)
+        if not link_match:
+            # Try matching empty path: [Title]()
+            link_match = re.match(r'^(\s*)([-*])\s+\[([^\]]+)\]\(\)\s*$', line)
+            if link_match:
+                indent, marker, title = link_match.groups()
+                path = ""
+            else:
+                continue
+        else:
             indent, marker, title, path = link_match.groups()
-            level = len(indent) // 2  # Assuming 2 spaces per level
-            is_draft = not path.strip()
+            # Handle paths with parentheses by finding the last ) that closes the link
+            # Count parentheses to find the correct closing one
+            if path.count('(') != path.count(')'):
+                # Reparse to find balanced parentheses
+                # Get everything after ]( and find the balanced closing )
+                start_idx = line.find('](')
+                if start_idx != -1:
+                    remaining = line[start_idx + 2:]
+                    paren_depth = 1
+                    path_end = 0
+                    for i, char in enumerate(remaining):
+                        if char == '(':
+                            paren_depth += 1
+                        elif char == ')':
+                            paren_depth -= 1
+                            if paren_depth == 0:
+                                path_end = i
+                                break
+                    if path_end > 0:
+                        path = remaining[:path_end]
 
-            # Determine if this is a numbered chapter
-            if not in_numbered_section and level == 0 and not is_draft:
-                # First root-level chapter with content starts numbered section
-                in_numbered_section = True
+        level = len(indent) // 2  # Assuming 2 spaces per level
+        # Cap the level to prevent excessive nesting
+        level = min(level, max_level)
+        is_draft = not path.strip()
 
-            # Generate chapter number if in numbered section
-            chapter_number = None
-            if in_numbered_section and not is_draft:
-                numbered_chapter_count[level] += 1
-                # Reset deeper levels
-                for i in range(level + 1, len(numbered_chapter_count)):
-                    numbered_chapter_count[i] = 0
-                # Build number string (e.g., "1.2.3")
-                number_parts = [str(numbered_chapter_count[i]) for i in range(level + 1) if numbered_chapter_count[i] > 0]
-                chapter_number = '.'.join(number_parts)
+        # Determine if this is a numbered chapter
+        if not in_numbered_section and level == 0 and not is_draft:
+            # First root-level chapter with content starts numbered section
+            in_numbered_section = True
 
-            chapter = Chapter(
-                title=title.strip(),
-                path=path.strip() if path.strip() else None,
-                level=level,
-                is_draft=is_draft,
-                number=chapter_number
-            )
-            chapters.append(chapter)
+        # Generate chapter number if in numbered section
+        chapter_number = None
+        if in_numbered_section and not is_draft:
+            # Initialize level counter if needed
+            if level not in numbered_chapter_count:
+                numbered_chapter_count[level] = 0
+            numbered_chapter_count[level] += 1
+            # Reset deeper levels
+            for deeper_level in list(numbered_chapter_count.keys()):
+                if deeper_level > level:
+                    numbered_chapter_count[deeper_level] = 0
+            # Build number string (e.g., "1.2.3")
+            number_parts = [str(numbered_chapter_count.get(i, 0)) for i in range(level + 1) if numbered_chapter_count.get(i, 0) > 0]
+            chapter_number = '.'.join(number_parts) if number_parts else None
+
+        chapter = Chapter(
+            title=title.strip(),
+            path=path.strip() if path.strip() else None,
+            level=level,
+            is_draft=is_draft,
+            number=chapter_number
+        )
+        chapters.append(chapter)
 
     return chapters
 
@@ -362,7 +416,10 @@ def combine_chapters(chapters: List[Chapter], base_path: str) -> Tuple[str, List
 
         if chapter.path:
             # Add chapter heading
-            heading_level = "#" * (chapter.level + 2)  # H2 for root level, H3 for level 1, etc.
+            # Cap at H6 (maximum valid HTML heading level)
+            # H2 for level 0, H3 for level 1, ..., H6 for level 4+
+            heading_depth = min(chapter.level + 2, 6)
+            heading_level = "#" * heading_depth
             chapter_title = chapter.title
             if chapter.number:
                 chapter_title = f"{chapter.number}. {chapter.title}"
@@ -373,10 +430,24 @@ def combine_chapters(chapters: List[Chapter], base_path: str) -> Tuple[str, List
             content = read_markdown_file(base_path, chapter.path)
 
             # Remove the first H1 from content if it exists (we already added the heading)
+            # Handle markdown files that start with blank lines before the H1
             content_lines = content.split('\n')
-            if content_lines and content_lines[0].strip().startswith('# '):
-                content_lines = content_lines[1:]
-            content = '\n'.join(content_lines)
+            h1_removed = False
+            new_lines = []
+            for line in content_lines:
+                if not h1_removed:
+                    # Skip leading blank lines when looking for H1
+                    if not line.strip():
+                        new_lines.append(line)
+                        continue
+                    # Check if this is the first non-blank line and it's an H1
+                    if line.strip().startswith('# '):
+                        h1_removed = True
+                        continue  # Skip the H1 line
+                    else:
+                        h1_removed = True  # First non-blank line is not H1, stop looking
+                new_lines.append(line)
+            content = '\n'.join(new_lines)
 
             combined_md += content + "\n\n"
 
@@ -401,15 +472,21 @@ def validate_project_path(project_path: str) -> Tuple[bool, str]:
     # Normalize the path
     normalized = os.path.normpath(project_path)
 
-    # Check for path traversal patterns
+    # Check for path traversal patterns in the original input
     if '..' in normalized.split(os.sep):
         return False, "Path traversal patterns (..) are not allowed."
 
-    # Check if it's an absolute path pointing to sensitive system directories
-    abs_path = os.path.abspath(normalized)
+    # Use realpath to resolve symlinks and get the actual target directory
+    # This prevents attacks using symlinks that point to sensitive directories
+    try:
+        real_path = os.path.realpath(normalized)
+    except (OSError, ValueError):
+        return False, "Invalid path."
+
+    # Check if the resolved path points to sensitive system directories
     sensitive_dirs = ['/etc', '/var', '/root', '/home/root', '/sys', '/proc', '/dev', '/boot']
     for sensitive in sensitive_dirs:
-        if abs_path == sensitive or abs_path.startswith(sensitive + os.sep):
+        if real_path == sensitive or real_path.startswith(sensitive + os.sep):
             return False, f"Access to system directory '{sensitive}' is not allowed."
 
     return True, ""
