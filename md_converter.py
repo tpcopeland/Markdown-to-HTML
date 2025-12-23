@@ -15,7 +15,7 @@ import re
 import io
 import tempfile
 import zipfile
-from typing import Optional, Tuple
+from typing import Optional, Tuple, List
 
 # Check for pypandoc availability
 try:
@@ -71,15 +71,23 @@ def _preprocess_markdown_for_docx(content: str) -> str:
     return '\n'.join(result)
 
 
-def _postprocess_docx(docx_bytes: bytes) -> bytes:
+def _postprocess_docx(docx_bytes: bytes, font_name: str = "Calibri", font_size: str = "11") -> bytes:
     """
     Post-process DOCX to fix pandoc's default styling.
+
+    Args:
+        docx_bytes: The raw DOCX file bytes
+        font_name: Font family name to use (e.g., "Calibri", "Times New Roman")
+        font_size: Font size in points (e.g., "11", "12")
 
     Modifies:
     - word/styles.xml: Style definitions (header colors, fonts)
     - word/document.xml: Actual document content (inline colors)
     - word/theme/theme1.xml: Theme definitions (font defaults)
     """
+    # Convert font size to half-points (Word uses half-points internally)
+    font_size_half_pts = str(int(font_size) * 2)
+
     with zipfile.ZipFile(io.BytesIO(docx_bytes), 'r') as zin:
         output_buffer = io.BytesIO()
         with zipfile.ZipFile(output_buffer, 'w', zipfile.ZIP_DEFLATED) as zout:
@@ -92,16 +100,16 @@ def _postprocess_docx(docx_bytes: bytes) -> bytes:
                     content = re.sub(r'<w:color\s+w:val="[0-9A-Fa-f]{6}"\s*/>', '', content)
                     # Remove theme color references
                     content = re.sub(r'<w:color[^>]*w:themeColor="[^"]*"[^>]*/>', '', content)
-                    # Replace Cambria font with Latin Modern Roman
-                    content = re.sub(r'w:ascii="Cambria"', 'w:ascii="Latin Modern Roman"', content)
-                    content = re.sub(r'w:hAnsi="Cambria"', 'w:hAnsi="Latin Modern Roman"', content)
-                    content = re.sub(r'w:eastAsia="Cambria"', 'w:eastAsia="Latin Modern Roman"', content)
-                    content = re.sub(r'w:cs="Cambria"', 'w:cs="Latin Modern Roman"', content)
+                    # Replace fonts with user-specified font
+                    content = re.sub(r'w:ascii="[^"]*"', f'w:ascii="{font_name}"', content)
+                    content = re.sub(r'w:hAnsi="[^"]*"', f'w:hAnsi="{font_name}"', content)
+                    content = re.sub(r'w:eastAsia="[^"]*"', f'w:eastAsia="{font_name}"', content)
+                    content = re.sub(r'w:cs="[^"]*"', f'w:cs="{font_name}"', content)
                     # Replace theme font references
-                    content = re.sub(r'w:asciiTheme="[^"]*"', 'w:ascii="Latin Modern Roman"', content)
-                    content = re.sub(r'w:hAnsiTheme="[^"]*"', 'w:hAnsi="Latin Modern Roman"', content)
-                    content = re.sub(r'w:eastAsiaTheme="[^"]*"', 'w:eastAsia="Latin Modern Roman"', content)
-                    content = re.sub(r'w:cstheme="[^"]*"', 'w:cs="Latin Modern Roman"', content)
+                    content = re.sub(r'w:asciiTheme="[^"]*"', f'w:ascii="{font_name}"', content)
+                    content = re.sub(r'w:hAnsiTheme="[^"]*"', f'w:hAnsi="{font_name}"', content)
+                    content = re.sub(r'w:eastAsiaTheme="[^"]*"', f'w:eastAsia="{font_name}"', content)
+                    content = re.sub(r'w:cstheme="[^"]*"', f'w:cs="{font_name}"', content)
                     data = content.encode('utf-8')
 
                 elif item.filename == 'word/document.xml':
@@ -113,7 +121,7 @@ def _postprocess_docx(docx_bytes: bytes) -> bytes:
 
                 elif item.filename == 'word/theme/theme1.xml':
                     content = data.decode('utf-8')
-                    content = re.sub(r'typeface="Cambria"', 'typeface="Latin Modern Roman"', content)
+                    content = re.sub(r'typeface="[^"]*"', f'typeface="{font_name}"', content)
                     data = content.encode('utf-8')
 
                 zout.writestr(item, data)
@@ -146,7 +154,10 @@ def check_docx_dependencies() -> Tuple[bool, str]:
 
 def convert_markdown_to_docx(
     markdown_content: str,
-    output_path: Optional[str] = None
+    output_path: Optional[str] = None,
+    extra_args: Optional[list] = None,
+    font_name: str = "Calibri",
+    font_size: str = "11"
 ) -> bytes:
     """
     Convert Markdown content to DOCX format.
@@ -154,6 +165,9 @@ def convert_markdown_to_docx(
     Args:
         markdown_content: The markdown text to convert
         output_path: Optional path to write the DOCX file
+        extra_args: Optional list of extra pandoc arguments
+        font_name: Font family name (e.g., "Calibri", "Times New Roman")
+        font_size: Font size in points (e.g., "11", "12")
 
     Returns:
         The DOCX file content as bytes
@@ -165,6 +179,10 @@ def convert_markdown_to_docx(
     available, error = check_docx_dependencies()
     if not available:
         raise ImportError(error)
+
+    # Default extra args if not provided
+    if extra_args is None:
+        extra_args = ["--standalone", "--highlight-style=pygments", "--dpi=96"]
 
     # Preprocess markdown for better list handling
     content = _preprocess_markdown_for_docx(markdown_content)
@@ -181,7 +199,7 @@ def convert_markdown_to_docx(
                 temp_input,
                 "docx",
                 outputfile=temp_output,
-                extra_args=["--standalone", "--highlight-style=pygments", "--dpi=96"]
+                extra_args=extra_args
             )
         except Exception as e:
             raise RuntimeError(
@@ -193,8 +211,8 @@ def convert_markdown_to_docx(
         with open(temp_output, 'rb') as f:
             docx_bytes = f.read()
 
-        # Post-process to fix styling
-        docx_bytes = _postprocess_docx(docx_bytes)
+        # Post-process to fix styling with font options
+        docx_bytes = _postprocess_docx(docx_bytes, font_name=font_name, font_size=font_size)
 
         # Write to output path if specified
         if output_path:
