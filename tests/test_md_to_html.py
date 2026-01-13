@@ -1,5 +1,5 @@
 """
-Unit tests for md_to_html.py
+Unit tests for md_converter.py
 
 Tests security features, input validation, and core functionality.
 """
@@ -11,7 +11,7 @@ from unittest.mock import MagicMock, patch, PropertyMock
 # Add parent directory to path for imports
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-# Create comprehensive streamlit mock before importing md_to_html
+# Create comprehensive streamlit mock before importing md_converter
 mock_st = MagicMock()
 # columns() returns variable number based on input
 def mock_columns(num_cols, **kwargs):
@@ -53,7 +53,7 @@ sys.modules['streamlit'] = mock_st
 sys.modules['streamlit.components'] = MagicMock()
 sys.modules['streamlit.components.v1'] = MagicMock()
 
-import md_to_html
+import md_converter
 
 
 class TestEscapeHtml(unittest.TestCase):
@@ -61,21 +61,21 @@ class TestEscapeHtml(unittest.TestCase):
 
     def test_escape_html_basic(self):
         """Test basic HTML character escaping."""
-        self.assertEqual(md_to_html.escape_html("<script>"), "&lt;script&gt;")
-        self.assertEqual(md_to_html.escape_html("a & b"), "a &amp; b")
-        self.assertEqual(md_to_html.escape_html('"test"'), "&quot;test&quot;")
-        self.assertEqual(md_to_html.escape_html("'test'"), "&#x27;test&#x27;")
+        self.assertEqual(md_converter.escape_html("<script>"), "&lt;script&gt;")
+        self.assertEqual(md_converter.escape_html("a & b"), "a &amp; b")
+        self.assertEqual(md_converter.escape_html('"test"'), "&quot;test&quot;")
+        self.assertEqual(md_converter.escape_html("'test'"), "&#x27;test&#x27;")
 
     def test_escape_html_empty(self):
         """Test empty string handling."""
-        self.assertEqual(md_to_html.escape_html(""), "")
-        self.assertEqual(md_to_html.escape_html(None), "")
+        self.assertEqual(md_converter.escape_html(""), "")
+        self.assertEqual(md_converter.escape_html(None), "")
 
     def test_escape_html_combined(self):
         """Test combined special characters."""
         input_str = '<a href="test">click & go</a>'
         expected = "&lt;a href=&quot;test&quot;&gt;click &amp; go&lt;/a&gt;"
-        self.assertEqual(md_to_html.escape_html(input_str), expected)
+        self.assertEqual(md_converter.escape_html(input_str), expected)
 
 
 class TestEscapeJsString(unittest.TestCase):
@@ -83,18 +83,18 @@ class TestEscapeJsString(unittest.TestCase):
 
     def test_escape_js_string_basic(self):
         """Test basic JS escaping."""
-        self.assertEqual(md_to_html.escape_js_string("test's"), "test\\'s")
-        self.assertEqual(md_to_html.escape_js_string('test"s'), 'test\\"s')
-        self.assertEqual(md_to_html.escape_js_string("line\nbreak"), "line\\nbreak")
+        self.assertEqual(md_converter.escape_js_string("test's"), "test\\'s")
+        self.assertEqual(md_converter.escape_js_string('test"s'), 'test\\"s')
+        self.assertEqual(md_converter.escape_js_string("line\nbreak"), "line\\nbreak")
 
     def test_escape_js_string_script_tag(self):
         """Test script tag escaping."""
-        self.assertEqual(md_to_html.escape_js_string("</script>"), "<\\/script>")
+        self.assertEqual(md_converter.escape_js_string("</script>"), "<\\/script>")
 
     def test_escape_js_string_empty(self):
         """Test empty string handling."""
-        self.assertEqual(md_to_html.escape_js_string(""), "")
-        self.assertEqual(md_to_html.escape_js_string(None), "")
+        self.assertEqual(md_converter.escape_js_string(""), "")
+        self.assertEqual(md_converter.escape_js_string(None), "")
 
 
 class TestEscapeForScriptTag(unittest.TestCase):
@@ -102,18 +102,18 @@ class TestEscapeForScriptTag(unittest.TestCase):
 
     def test_escape_script_tag_closing(self):
         """Test closing script tag escaping."""
-        self.assertEqual(md_to_html.escape_for_script_tag("</script>"), "<\\/script>")
+        self.assertEqual(md_converter.escape_for_script_tag("</script>"), "<\\/script>")
         # Case-insensitive replacement - all variants become lowercase escaped
         # This is safe because the browser won't close the tag regardless of case
-        result_upper = md_to_html.escape_for_script_tag("</SCRIPT>")
+        result_upper = md_converter.escape_for_script_tag("</SCRIPT>")
         self.assertIn("<\\/", result_upper)
-        result_mixed = md_to_html.escape_for_script_tag("</Script>")
+        result_mixed = md_converter.escape_for_script_tag("</Script>")
         self.assertIn("<\\/", result_mixed)
 
     def test_escape_script_tag_empty(self):
         """Test empty string handling."""
-        self.assertEqual(md_to_html.escape_for_script_tag(""), "")
-        self.assertEqual(md_to_html.escape_for_script_tag(None), "")
+        self.assertEqual(md_converter.escape_for_script_tag(""), "")
+        self.assertEqual(md_converter.escape_for_script_tag(None), "")
 
 
 class TestSanitizeForHtmlComment(unittest.TestCase):
@@ -121,19 +121,19 @@ class TestSanitizeForHtmlComment(unittest.TestCase):
 
     def test_sanitize_double_dash(self):
         """Test double dash escaping."""
-        self.assertEqual(md_to_html.sanitize_for_html_comment("--"), "&#45;&#45;")
-        self.assertEqual(md_to_html.sanitize_for_html_comment("test--value"), "test&#45;&#45;value")
+        self.assertEqual(md_converter.sanitize_for_html_comment("--"), "&#45;&#45;")
+        self.assertEqual(md_converter.sanitize_for_html_comment("test--value"), "test&#45;&#45;value")
 
     def test_sanitize_comment_breakout(self):
         """Test comment breakout prevention."""
         # This would normally break out of a comment
-        result = md_to_html.sanitize_for_html_comment("-->")
+        result = md_converter.sanitize_for_html_comment("-->")
         self.assertNotIn("-->", result)
 
     def test_sanitize_empty(self):
         """Test empty string handling."""
-        self.assertEqual(md_to_html.sanitize_for_html_comment(""), "")
-        self.assertEqual(md_to_html.sanitize_for_html_comment(None), "")
+        self.assertEqual(md_converter.sanitize_for_html_comment(""), "")
+        self.assertEqual(md_converter.sanitize_for_html_comment(None), "")
 
 
 class TestValidateCssSize(unittest.TestCase):
@@ -141,26 +141,26 @@ class TestValidateCssSize(unittest.TestCase):
 
     def test_validate_css_size_valid(self):
         """Test valid CSS sizes."""
-        self.assertTrue(md_to_html.validate_css_size("100%"))
-        self.assertTrue(md_to_html.validate_css_size("16px"))
-        self.assertTrue(md_to_html.validate_css_size("1.5em"))
-        self.assertTrue(md_to_html.validate_css_size("2rem"))
-        self.assertTrue(md_to_html.validate_css_size("100vh"))
-        self.assertTrue(md_to_html.validate_css_size("50vw"))
+        self.assertTrue(md_converter.validate_css_size("100%"))
+        self.assertTrue(md_converter.validate_css_size("16px"))
+        self.assertTrue(md_converter.validate_css_size("1.5em"))
+        self.assertTrue(md_converter.validate_css_size("2rem"))
+        self.assertTrue(md_converter.validate_css_size("100vh"))
+        self.assertTrue(md_converter.validate_css_size("50vw"))
 
     def test_validate_css_size_invalid(self):
         """Test invalid CSS sizes."""
-        self.assertFalse(md_to_html.validate_css_size(""))
-        self.assertFalse(md_to_html.validate_css_size("abc"))
-        self.assertFalse(md_to_html.validate_css_size("100"))
-        self.assertFalse(md_to_html.validate_css_size("100pt"))
-        self.assertFalse(md_to_html.validate_css_size("url(evil.css)"))
-        self.assertFalse(md_to_html.validate_css_size("100%; injection"))
+        self.assertFalse(md_converter.validate_css_size(""))
+        self.assertFalse(md_converter.validate_css_size("abc"))
+        self.assertFalse(md_converter.validate_css_size("100"))
+        self.assertFalse(md_converter.validate_css_size("100pt"))
+        self.assertFalse(md_converter.validate_css_size("url(evil.css)"))
+        self.assertFalse(md_converter.validate_css_size("100%; injection"))
 
     def test_validate_css_size_injection(self):
         """Test CSS injection attempts."""
-        self.assertFalse(md_to_html.validate_css_size("100%}body{color:red"))
-        self.assertFalse(md_to_html.validate_css_size("expression(alert())"))
+        self.assertFalse(md_converter.validate_css_size("100%}body{color:red"))
+        self.assertFalse(md_converter.validate_css_size("expression(alert())"))
 
 
 class TestSanitizeFilename(unittest.TestCase):
@@ -168,22 +168,22 @@ class TestSanitizeFilename(unittest.TestCase):
 
     def test_sanitize_filename_basic(self):
         """Test basic filename sanitization."""
-        self.assertEqual(md_to_html.sanitize_filename("test"), "test.html")
-        self.assertEqual(md_to_html.sanitize_filename("test.html"), "test.html")
+        self.assertEqual(md_converter.sanitize_filename("test"), "test.html")
+        self.assertEqual(md_converter.sanitize_filename("test.html"), "test.html")
 
     def test_sanitize_filename_special_chars(self):
         """Test special character removal."""
-        self.assertEqual(md_to_html.sanitize_filename("test<>file"), "testfile.html")
-        self.assertEqual(md_to_html.sanitize_filename("test/file"), "testfile.html")
+        self.assertEqual(md_converter.sanitize_filename("test<>file"), "testfile.html")
+        self.assertEqual(md_converter.sanitize_filename("test/file"), "testfile.html")
 
     def test_sanitize_filename_empty(self):
         """Test empty filename handling."""
-        self.assertEqual(md_to_html.sanitize_filename(""), "document.html")
-        self.assertEqual(md_to_html.sanitize_filename(None), "document.html")
+        self.assertEqual(md_converter.sanitize_filename(""), "document.html")
+        self.assertEqual(md_converter.sanitize_filename(None), "document.html")
 
     def test_sanitize_filename_path_traversal(self):
         """Test path traversal prevention."""
-        result = md_to_html.sanitize_filename("../../../etc/passwd")
+        result = md_converter.sanitize_filename("../../../etc/passwd")
         self.assertNotIn("..", result)
         self.assertNotIn("/", result)
 
@@ -193,14 +193,14 @@ class TestValidateDate(unittest.TestCase):
 
     def test_validate_date_valid(self):
         """Test valid ISO dates."""
-        self.assertTrue(md_to_html.validate_date("2024-01-15"))
-        self.assertTrue(md_to_html.validate_date(""))  # Empty is valid
+        self.assertTrue(md_converter.validate_date("2024-01-15"))
+        self.assertTrue(md_converter.validate_date(""))  # Empty is valid
 
     def test_validate_date_invalid(self):
         """Test invalid dates."""
-        self.assertFalse(md_to_html.validate_date("2024/01/15"))
-        self.assertFalse(md_to_html.validate_date("01-15-2024"))
-        self.assertFalse(md_to_html.validate_date("not-a-date"))
+        self.assertFalse(md_converter.validate_date("2024/01/15"))
+        self.assertFalse(md_converter.validate_date("01-15-2024"))
+        self.assertFalse(md_converter.validate_date("not-a-date"))
 
 
 class TestValidateVendorPath(unittest.TestCase):
@@ -208,24 +208,24 @@ class TestValidateVendorPath(unittest.TestCase):
 
     def setUp(self):
         """Set up test fixtures."""
-        self.vendor_dir = md_to_html.VENDOR_DIR
+        self.vendor_dir = md_converter.VENDOR_DIR
 
     def test_validate_vendor_path_valid(self):
         """Test valid vendor filenames."""
         # Should not raise
-        result = md_to_html.validate_vendor_path(self.vendor_dir, "marked.umd.min.js")
+        result = md_converter.validate_vendor_path(self.vendor_dir, "marked.umd.min.js")
         self.assertTrue(result.endswith("marked.umd.min.js"))
 
     def test_validate_vendor_path_traversal(self):
         """Test path traversal prevention."""
         # These should trigger st.error and st.stop (mocked)
         with self.assertRaises(SystemExit):
-            md_to_html.validate_vendor_path(self.vendor_dir, "../secret.txt")
+            md_converter.validate_vendor_path(self.vendor_dir, "../secret.txt")
 
     def test_validate_vendor_path_dotfile(self):
         """Test dotfile prevention."""
         with self.assertRaises(SystemExit):
-            md_to_html.validate_vendor_path(self.vendor_dir, ".hidden")
+            md_converter.validate_vendor_path(self.vendor_dir, ".hidden")
 
 
 class TestValidateProjectPath(unittest.TestCase):
@@ -233,13 +233,13 @@ class TestValidateProjectPath(unittest.TestCase):
 
     def test_validate_project_path_valid(self):
         """Test valid project paths."""
-        is_valid, error = md_to_html.validate_project_path("/home/user/project")
+        is_valid, error = md_converter.validate_project_path("/home/user/project")
         self.assertTrue(is_valid)
         self.assertEqual(error, "")
 
     def test_validate_project_path_traversal(self):
         """Test path traversal prevention."""
-        is_valid, error = md_to_html.validate_project_path("../../../etc")
+        is_valid, error = md_converter.validate_project_path("../../../etc")
         self.assertFalse(is_valid)
         self.assertIn("traversal", error.lower())
 
@@ -247,12 +247,12 @@ class TestValidateProjectPath(unittest.TestCase):
         """Test sensitive directory blocking."""
         sensitive_dirs = ["/etc", "/var", "/root", "/sys", "/proc", "/dev", "/boot"]
         for path in sensitive_dirs:
-            is_valid, error = md_to_html.validate_project_path(path)
+            is_valid, error = md_converter.validate_project_path(path)
             self.assertFalse(is_valid, f"Should block {path}")
 
     def test_validate_project_path_empty(self):
         """Test empty path handling."""
-        is_valid, error = md_to_html.validate_project_path("")
+        is_valid, error = md_converter.validate_project_path("")
         self.assertFalse(is_valid)
 
 
@@ -262,7 +262,7 @@ class TestSafeReadFile(unittest.TestCase):
     def test_safe_read_file_traversal(self):
         """Test path traversal prevention."""
         with self.assertRaises(ValueError) as context:
-            md_to_html.safe_read_file("/tmp/test", "../../../etc/passwd")
+            md_converter.safe_read_file("/tmp/test", "../../../etc/passwd")
         self.assertIn("Security violation", str(context.exception))
 
 
@@ -273,14 +273,14 @@ class TestGetThemeCss(unittest.TestCase):
         """Test valid theme names."""
         themes = ["default", "github", "academic", "minimal", "dark"]
         for theme in themes:
-            result = md_to_html.get_theme_css(theme)
+            result = md_converter.get_theme_css(theme)
             self.assertIsInstance(result, list)
             self.assertGreater(len(result), 0)
 
     def test_get_theme_css_invalid(self):
         """Test invalid theme falls back to default."""
-        result = md_to_html.get_theme_css("nonexistent")
-        default = md_to_html.get_theme_css("default")
+        result = md_converter.get_theme_css("nonexistent")
+        default = md_converter.get_theme_css("default")
         self.assertEqual(result, default)
 
 
@@ -289,7 +289,7 @@ class TestGenerateCss(unittest.TestCase):
 
     def test_generate_css_valid_sizes(self):
         """Test CSS generation with valid sizes."""
-        css = md_to_html.generate_css(
+        css = md_converter.generate_css(
             toc_mode="top",
             back_to_top=True,
             search_enabled=True,
@@ -306,7 +306,7 @@ class TestGenerateCss(unittest.TestCase):
 
     def test_generate_css_invalid_sizes_default(self):
         """Test CSS generation with invalid sizes uses defaults."""
-        css = md_to_html.generate_css(
+        css = md_converter.generate_css(
             toc_mode="top",
             back_to_top=True,
             search_enabled=True,
@@ -328,7 +328,7 @@ class TestGenerateToolbar(unittest.TestCase):
 
     def test_generate_toolbar_escapes_title(self):
         """Test that title is properly escaped."""
-        toolbar = md_to_html.generate_toolbar(
+        toolbar = md_converter.generate_toolbar(
             title='<script>alert("xss")</script>',
             toc_mode="none",
             search_enabled=False,
@@ -339,7 +339,7 @@ class TestGenerateToolbar(unittest.TestCase):
 
     def test_generate_toolbar_dark_theme_no_toggle(self):
         """Test dark theme preset doesn't show theme toggle."""
-        toolbar = md_to_html.generate_toolbar(
+        toolbar = md_converter.generate_toolbar(
             title="Test",
             toc_mode="none",
             search_enabled=False,
@@ -349,7 +349,7 @@ class TestGenerateToolbar(unittest.TestCase):
 
     def test_generate_toolbar_light_theme_has_toggle(self):
         """Test non-dark theme shows theme toggle."""
-        toolbar = md_to_html.generate_toolbar(
+        toolbar = md_converter.generate_toolbar(
             title="Test",
             toc_mode="none",
             search_enabled=False,
@@ -363,7 +363,7 @@ class TestChapterParsing(unittest.TestCase):
 
     def test_chapter_creation(self):
         """Test Chapter class creation."""
-        chapter = md_to_html.Chapter(
+        chapter = md_converter.Chapter(
             title="Test Chapter",
             path="test.md",
             level=0,
@@ -376,7 +376,7 @@ class TestChapterParsing(unittest.TestCase):
 
     def test_chapter_repr(self):
         """Test Chapter string representation."""
-        chapter = md_to_html.Chapter(title="Test", path="test.md", level=1)
+        chapter = md_converter.Chapter(title="Test", path="test.md", level=1)
         repr_str = repr(chapter)
         self.assertIn("Test", repr_str)
         self.assertIn("test.md", repr_str)
@@ -389,7 +389,7 @@ class TestSanitizeFilenameExtended(unittest.TestCase):
         """Test that long filenames are properly truncated while preserving .html extension."""
         # Very long filename should be truncated to 255 chars max with .html preserved
         long_name = "a" * 300
-        result = md_to_html.sanitize_filename(long_name)
+        result = md_converter.sanitize_filename(long_name)
         self.assertEqual(len(result), 255)
         self.assertTrue(result.endswith(".html"))
         self.assertEqual(result, "a" * 250 + ".html")
@@ -398,36 +398,36 @@ class TestSanitizeFilenameExtended(unittest.TestCase):
         """Test boundary cases for filename length."""
         # Exactly 250 chars - should become 255 with .html
         name_250 = "b" * 250
-        result = md_to_html.sanitize_filename(name_250)
+        result = md_converter.sanitize_filename(name_250)
         self.assertEqual(len(result), 255)
         self.assertTrue(result.endswith(".html"))
 
         # 251 chars - should be truncated to 250 + .html = 255
         name_251 = "c" * 251
-        result = md_to_html.sanitize_filename(name_251)
+        result = md_converter.sanitize_filename(name_251)
         self.assertEqual(len(result), 255)
         self.assertTrue(result.endswith(".html"))
 
     def test_sanitize_filename_long_with_html_extension(self):
         """Test long filename that already has .html extension."""
         long_with_ext = "d" * 300 + ".html"
-        result = md_to_html.sanitize_filename(long_with_ext)
+        result = md_converter.sanitize_filename(long_with_ext)
         self.assertEqual(len(result), 255)
         self.assertTrue(result.endswith(".html"))
         self.assertEqual(result, "d" * 250 + ".html")
 
     def test_sanitize_filename_only_special_chars(self):
         """Test filename with only strippable characters."""
-        self.assertEqual(md_to_html.sanitize_filename(".."), "document.html")
-        self.assertEqual(md_to_html.sanitize_filename("___"), "document.html")
-        self.assertEqual(md_to_html.sanitize_filename("-.-"), "document.html")
-        self.assertEqual(md_to_html.sanitize_filename("..."), "document.html")
+        self.assertEqual(md_converter.sanitize_filename(".."), "document.html")
+        self.assertEqual(md_converter.sanitize_filename("___"), "document.html")
+        self.assertEqual(md_converter.sanitize_filename("-.-"), "document.html")
+        self.assertEqual(md_converter.sanitize_filename("..."), "document.html")
 
     def test_sanitize_filename_whitespace(self):
         """Test filename with whitespace characters."""
-        self.assertEqual(md_to_html.sanitize_filename("test file"), "test_file.html")
-        self.assertEqual(md_to_html.sanitize_filename("test  file"), "test_file.html")
-        self.assertEqual(md_to_html.sanitize_filename("  test  "), "test.html")
+        self.assertEqual(md_converter.sanitize_filename("test file"), "test_file.html")
+        self.assertEqual(md_converter.sanitize_filename("test  file"), "test_file.html")
+        self.assertEqual(md_converter.sanitize_filename("  test  "), "test.html")
 
 
 class TestGenerateJavascript(unittest.TestCase):
@@ -439,7 +439,7 @@ class TestGenerateJavascript(unittest.TestCase):
             "marked": "// marked.js placeholder",
             "purify": "// purify.js placeholder"
         }
-        js = md_to_html.generate_javascript(
+        js = md_converter.generate_javascript(
             vendor_libs=vendor_libs,
             toc_mode="none",
             toc_levels="h2",
@@ -463,7 +463,7 @@ class TestGenerateJavascript(unittest.TestCase):
             "marked": "// marked.js",
             "purify": "// purify.js"
         }
-        js = md_to_html.generate_javascript(
+        js = md_converter.generate_javascript(
             vendor_libs=vendor_libs,
             toc_mode="none",
             toc_levels="h2",
@@ -490,7 +490,7 @@ class TestBuildHtml(unittest.TestCase):
             "marked": "// marked.js placeholder",
             "purify": "// purify.js placeholder"
         }
-        html = md_to_html.build_html(
+        html = md_converter.build_html(
             md_text="# Test\n\nHello world",
             meta={"title": "Test Document"},
             vendor_libs=vendor_libs,
@@ -523,7 +523,7 @@ class TestBuildHtml(unittest.TestCase):
             "marked": "// marked.js",
             "purify": "// purify.js"
         }
-        html = md_to_html.build_html(
+        html = md_converter.build_html(
             md_text="Test </script> content",
             meta={"title": "Test"},
             vendor_libs=vendor_libs,
@@ -550,14 +550,14 @@ class TestHighlightThemeCss(unittest.TestCase):
         """Test valid highlight themes return CSS."""
         themes = ["github-light", "github-dark", "monokai", "atom-one-dark"]
         for theme in themes:
-            css = md_to_html.get_highlight_theme_css(theme)
+            css = md_converter.get_highlight_theme_css(theme)
             self.assertIsInstance(css, str)
             self.assertIn(".hljs", css)
 
     def test_get_highlight_theme_css_invalid(self):
         """Test invalid theme falls back to github-light."""
-        result = md_to_html.get_highlight_theme_css("nonexistent")
-        default = md_to_html.get_highlight_theme_css("github-light")
+        result = md_converter.get_highlight_theme_css("nonexistent")
+        default = md_converter.get_highlight_theme_css("github-light")
         self.assertEqual(result, default)
 
 
@@ -566,21 +566,21 @@ class TestGenerateTocContainers(unittest.TestCase):
 
     def test_generate_toc_containers_top(self):
         """Test top ToC container generation."""
-        top, sidebar = md_to_html.generate_toc_containers("top")
+        top, sidebar = md_converter.generate_toc_containers("top")
         self.assertIn('id="toc"', top)
         self.assertIn("Table of Contents", top)
         self.assertEqual(sidebar, "")
 
     def test_generate_toc_containers_sidebar(self):
         """Test sidebar ToC container generation."""
-        top, sidebar = md_to_html.generate_toc_containers("sidebar")
+        top, sidebar = md_converter.generate_toc_containers("sidebar")
         self.assertEqual(top, "")
         self.assertIn('id="toc-sidebar"', sidebar)
         self.assertIn("tocSidebarClose", sidebar)
 
     def test_generate_toc_containers_none(self):
         """Test no ToC container generation."""
-        top, sidebar = md_to_html.generate_toc_containers("none")
+        top, sidebar = md_converter.generate_toc_containers("none")
         self.assertEqual(top, "")
         self.assertEqual(sidebar, "")
 
@@ -590,13 +590,13 @@ class TestSanitizeCssSize(unittest.TestCase):
 
     def test_sanitize_css_size_valid(self):
         """Test valid CSS sizes are returned unchanged."""
-        self.assertEqual(md_to_html.sanitize_css_size("100%", "50%"), "100%")
-        self.assertEqual(md_to_html.sanitize_css_size("16px", "12px"), "16px")
+        self.assertEqual(md_converter.sanitize_css_size("100%", "50%"), "100%")
+        self.assertEqual(md_converter.sanitize_css_size("16px", "12px"), "16px")
 
     def test_sanitize_css_size_invalid_uses_default(self):
         """Test invalid CSS sizes return the default."""
-        self.assertEqual(md_to_html.sanitize_css_size("invalid", "100%"), "100%")
-        self.assertEqual(md_to_html.sanitize_css_size("", "50px"), "50px")
+        self.assertEqual(md_converter.sanitize_css_size("invalid", "100%"), "100%")
+        self.assertEqual(md_converter.sanitize_css_size("", "50px"), "50px")
 
 
 class TestSymlinkProtection(unittest.TestCase):
@@ -620,7 +620,7 @@ class TestSymlinkProtection(unittest.TestCase):
         try:
             # This should raise ValueError because symlink resolves outside base
             with self.assertRaises(ValueError) as context:
-                md_to_html.safe_read_file(base_dir, 'symlink.md')
+                md_converter.safe_read_file(base_dir, 'symlink.md')
             self.assertIn("Security violation", str(context.exception))
         finally:
             os.unlink(symlink_path)
@@ -638,7 +638,7 @@ class TestSymlinkProtection(unittest.TestCase):
             f.write('test content')
 
         try:
-            content = md_to_html.safe_read_file(base_dir, 'test.md')
+            content = md_converter.safe_read_file(base_dir, 'test.md')
             self.assertEqual(content, 'test content')
         finally:
             os.unlink(test_file)
@@ -650,28 +650,28 @@ class TestScriptTagEscapeBypass(unittest.TestCase):
 
     def test_escape_script_with_space(self):
         """Test escaping </script > with trailing space."""
-        result = md_to_html.escape_for_script_tag("</script >")
+        result = md_converter.escape_for_script_tag("</script >")
         self.assertNotIn("</script", result.lower())
 
     def test_escape_script_with_tab(self):
         """Test escaping </script\t> with tab."""
-        result = md_to_html.escape_for_script_tag("</script\t>")
+        result = md_converter.escape_for_script_tag("</script\t>")
         self.assertNotIn("</script", result.lower())
 
     def test_escape_script_with_newline(self):
         """Test escaping </script\n> with newline."""
-        result = md_to_html.escape_for_script_tag("</script\n>")
+        result = md_converter.escape_for_script_tag("</script\n>")
         self.assertNotIn("</script", result.lower())
 
     def test_escape_html_comment(self):
         """Test escaping HTML comments which could break script context."""
-        result = md_to_html.escape_for_script_tag("<!--comment-->")
+        result = md_converter.escape_for_script_tag("<!--comment-->")
         self.assertNotIn("<!--", result)
 
     def test_escape_multiple_variants(self):
         """Test escaping multiple script tag variants in one string."""
         input_str = "a</script>b</SCRIPT >c</script\t>d"
-        result = md_to_html.escape_for_script_tag(input_str)
+        result = md_converter.escape_for_script_tag(input_str)
         self.assertNotIn("</script>", result.lower())
         self.assertNotIn("</script ", result.lower())
 
@@ -681,19 +681,19 @@ class TestSanitizeFilenameCaseSensitivity(unittest.TestCase):
 
     def test_uppercase_html_extension(self):
         """Test that .HTML extension is recognized."""
-        self.assertEqual(md_to_html.sanitize_filename("test.HTML"), "test.html")
+        self.assertEqual(md_converter.sanitize_filename("test.HTML"), "test.html")
 
     def test_mixed_case_html_extension(self):
         """Test that .Html extension is recognized."""
-        self.assertEqual(md_to_html.sanitize_filename("test.Html"), "test.html")
+        self.assertEqual(md_converter.sanitize_filename("test.Html"), "test.html")
 
     def test_lowercase_html_extension(self):
         """Test that .html extension is recognized."""
-        self.assertEqual(md_to_html.sanitize_filename("test.html"), "test.html")
+        self.assertEqual(md_converter.sanitize_filename("test.html"), "test.html")
 
     def test_no_double_extension(self):
         """Test that we don't get double .html extensions."""
-        result = md_to_html.sanitize_filename("document.HTML")
+        result = md_converter.sanitize_filename("document.HTML")
         self.assertEqual(result.count('.html'), 1)
 
 
@@ -717,7 +717,7 @@ class TestDeepNestingParsing(unittest.TestCase):
 
         try:
             # This should not raise IndexError
-            chapters = md_to_html.parse_summary_md(temp_path)
+            chapters = md_converter.parse_summary_md(temp_path)
             self.assertEqual(len(chapters), 15)
             # Verify deepest chapter has correct level
             self.assertEqual(chapters[-1].level, 14)
@@ -742,7 +742,7 @@ class TestDeepNestingParsing(unittest.TestCase):
             temp_path = f.name
 
         try:
-            chapters = md_to_html.parse_summary_md(temp_path)
+            chapters = md_converter.parse_summary_md(temp_path)
             numbers = [c.number for c in chapters if c.number]
             self.assertEqual(numbers, ['1', '1.1', '1.1.1', '2', '2.1'])
         finally:
@@ -766,7 +766,7 @@ class TestPathWithParentheses(unittest.TestCase):
             temp_path = f.name
 
         try:
-            chapters = md_to_html.parse_summary_md(temp_path)
+            chapters = md_converter.parse_summary_md(temp_path)
             chapter = [c for c in chapters if c.path][0]
             self.assertEqual(chapter.path, "path(with)parens.md")
         finally:
@@ -786,7 +786,7 @@ class TestPathWithParentheses(unittest.TestCase):
             temp_path = f.name
 
         try:
-            chapters = md_to_html.parse_summary_md(temp_path)
+            chapters = md_converter.parse_summary_md(temp_path)
             chapter = [c for c in chapters if c.path][0]
             self.assertEqual(chapter.path, "path(with(nested))parens.md")
         finally:
@@ -806,7 +806,7 @@ class TestPathWithParentheses(unittest.TestCase):
             temp_path = f.name
 
         try:
-            chapters = md_to_html.parse_summary_md(temp_path)
+            chapters = md_converter.parse_summary_md(temp_path)
             chapter = [c for c in chapters if not c.is_separator and not c.is_part_title][0]
             self.assertTrue(chapter.is_draft)
             self.assertIsNone(chapter.path)
@@ -821,15 +821,15 @@ class TestCombineChaptersHeadingLevel(unittest.TestCase):
         """Test that deeply nested chapters don't exceed H6."""
         # Create chapters with deep nesting
         chapters = [
-            md_to_html.Chapter("L0", path="l0.md", level=0),
-            md_to_html.Chapter("L4", path="l4.md", level=4),  # Would be H6
-            md_to_html.Chapter("L5", path="l5.md", level=5),  # Would be H7 without cap
-            md_to_html.Chapter("L10", path="l10.md", level=10),  # Would be H12 without cap
+            md_converter.Chapter("L0", path="l0.md", level=0),
+            md_converter.Chapter("L4", path="l4.md", level=4),  # Would be H6
+            md_converter.Chapter("L5", path="l5.md", level=5),  # Would be H7 without cap
+            md_converter.Chapter("L10", path="l10.md", level=10),  # Would be H12 without cap
         ]
 
         # Mock the file reading
-        with patch.object(md_to_html, 'read_markdown_file', return_value="Content here"):
-            combined, metadata = md_to_html.combine_chapters(chapters, "/fake/path")
+        with patch.object(md_converter, 'read_markdown_file', return_value="Content here"):
+            combined, metadata = md_converter.combine_chapters(chapters, "/fake/path")
 
         # Check that heading levels are capped
         self.assertIn("## L0", combined)  # Level 0 -> H2
@@ -846,12 +846,12 @@ class TestH1RemovalWithLeadingBlanks(unittest.TestCase):
 
     def test_h1_removed_after_blank_lines(self):
         """Test H1 is removed even if preceded by blank lines."""
-        chapter = md_to_html.Chapter("Test Chapter", path="test.md", level=0)
+        chapter = md_converter.Chapter("Test Chapter", path="test.md", level=0)
 
         markdown_with_leading_blanks = "\n\n\n# Title to Remove\n\nActual content here."
 
-        with patch.object(md_to_html, 'read_markdown_file', return_value=markdown_with_leading_blanks):
-            combined, metadata = md_to_html.combine_chapters([chapter], "/fake/path")
+        with patch.object(md_converter, 'read_markdown_file', return_value=markdown_with_leading_blanks):
+            combined, metadata = md_converter.combine_chapters([chapter], "/fake/path")
 
         # The original H1 should be removed
         self.assertNotIn("# Title to Remove", combined)
@@ -862,12 +862,12 @@ class TestH1RemovalWithLeadingBlanks(unittest.TestCase):
 
     def test_h1_not_removed_if_not_first(self):
         """Test that H1 in the middle of content is not removed."""
-        chapter = md_to_html.Chapter("Test Chapter", path="test.md", level=0)
+        chapter = md_converter.Chapter("Test Chapter", path="test.md", level=0)
 
         markdown_with_h1_later = "Some intro text.\n\n# Not First H1\n\nMore content."
 
-        with patch.object(md_to_html, 'read_markdown_file', return_value=markdown_with_h1_later):
-            combined, metadata = md_to_html.combine_chapters([chapter], "/fake/path")
+        with patch.object(md_converter, 'read_markdown_file', return_value=markdown_with_h1_later):
+            combined, metadata = md_converter.combine_chapters([chapter], "/fake/path")
 
         # This H1 should NOT be removed because it's not the first non-blank line
         self.assertIn("# Not First H1", combined)
@@ -887,7 +887,7 @@ class TestValidateProjectPathSymlink(unittest.TestCase):
 
         try:
             os.symlink('/etc', symlink_path)
-            is_valid, error = md_to_html.validate_project_path(symlink_path)
+            is_valid, error = md_converter.validate_project_path(symlink_path)
             self.assertFalse(is_valid)
             self.assertIn("/etc", error)
         finally:
@@ -915,7 +915,7 @@ class TestTabIndentation(unittest.TestCase):
             temp_path = f.name
 
         try:
-            chapters = md_to_html.parse_summary_md(temp_path)
+            chapters = md_converter.parse_summary_md(temp_path)
             levels = [c.level for c in chapters if c.path]
             # 1 tab = 4 spaces = 2 levels
             self.assertEqual(levels, [0, 2, 4])
@@ -939,7 +939,7 @@ class TestTabIndentation(unittest.TestCase):
             temp_path = f.name
 
         try:
-            chapters = md_to_html.parse_summary_md(temp_path)
+            chapters = md_converter.parse_summary_md(temp_path)
             levels = [c.level for c in chapters if c.path]
             self.assertEqual(levels, [0, 1, 2])
         finally:
@@ -951,19 +951,19 @@ class TestUnicodeEscaping(unittest.TestCase):
 
     def test_escape_line_separator(self):
         """Test U+2028 LINE SEPARATOR is escaped."""
-        result = md_to_html.escape_js_string("test\u2028line")
+        result = md_converter.escape_js_string("test\u2028line")
         self.assertIn("\\u2028", result)
         self.assertNotIn("\u2028", result)
 
     def test_escape_paragraph_separator(self):
         """Test U+2029 PARAGRAPH SEPARATOR is escaped."""
-        result = md_to_html.escape_js_string("test\u2029para")
+        result = md_converter.escape_js_string("test\u2029para")
         self.assertIn("\\u2029", result)
         self.assertNotIn("\u2029", result)
 
     def test_escape_combined(self):
         """Test both separators together."""
-        result = md_to_html.escape_js_string("a\u2028b\u2029c")
+        result = md_converter.escape_js_string("a\u2028b\u2029c")
         self.assertIn("\\u2028", result)
         self.assertIn("\\u2029", result)
 
@@ -974,7 +974,7 @@ class TestByteCountTruncation(unittest.TestCase):
     def test_ascii_truncation(self):
         """Test ASCII filename truncation works."""
         long_name = "a" * 300
-        result = md_to_html.sanitize_filename(long_name)
+        result = md_converter.sanitize_filename(long_name)
         # Should be 250 bytes + 5 bytes (.html) = 255 bytes max
         self.assertLessEqual(len(result.encode('utf-8')), 255)
         self.assertTrue(result.endswith('.html'))
@@ -983,7 +983,7 @@ class TestByteCountTruncation(unittest.TestCase):
         """Test Unicode filename truncation respects byte limits."""
         # Each emoji is 4 bytes in UTF-8
         emoji_name = "📄" * 100  # 400 bytes of emoji
-        result = md_to_html.sanitize_filename(emoji_name)
+        result = md_converter.sanitize_filename(emoji_name)
         # Should be truncated to fit within 255 bytes
         self.assertLessEqual(len(result.encode('utf-8')), 255)
         self.assertTrue(result.endswith('.html'))
@@ -992,7 +992,7 @@ class TestByteCountTruncation(unittest.TestCase):
         """Test CJK character truncation respects byte limits."""
         # Each CJK character is 3 bytes in UTF-8
         cjk_name = "文" * 100  # 300 bytes of CJK
-        result = md_to_html.sanitize_filename(cjk_name)
+        result = md_converter.sanitize_filename(cjk_name)
         self.assertLessEqual(len(result.encode('utf-8')), 255)
         self.assertTrue(result.endswith('.html'))
 
@@ -1002,13 +1002,13 @@ class TestFileSizeLimits(unittest.TestCase):
 
     def test_max_markdown_size_defined(self):
         """Test MAX_MARKDOWN_SIZE constant exists."""
-        self.assertTrue(hasattr(md_to_html, 'MAX_MARKDOWN_SIZE'))
-        self.assertGreater(md_to_html.MAX_MARKDOWN_SIZE, 0)
+        self.assertTrue(hasattr(md_converter, 'MAX_MARKDOWN_SIZE'))
+        self.assertGreater(md_converter.MAX_MARKDOWN_SIZE, 0)
 
     def test_max_vendor_js_size_defined(self):
         """Test MAX_VENDOR_JS_SIZE constant exists."""
-        self.assertTrue(hasattr(md_to_html, 'MAX_VENDOR_JS_SIZE'))
-        self.assertGreater(md_to_html.MAX_VENDOR_JS_SIZE, 0)
+        self.assertTrue(hasattr(md_converter, 'MAX_VENDOR_JS_SIZE'))
+        self.assertGreater(md_converter.MAX_VENDOR_JS_SIZE, 0)
 
 
 if __name__ == "__main__":

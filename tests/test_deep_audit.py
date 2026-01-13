@@ -16,7 +16,7 @@ from unittest.mock import MagicMock
 # Add parent directory to path for imports
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-# Create comprehensive streamlit mock before importing md_to_html
+# Create comprehensive streamlit mock before importing md_converter
 mock_st = MagicMock()
 def mock_columns(num_cols, **kwargs):
     if isinstance(num_cols, list):
@@ -56,7 +56,7 @@ sys.modules['streamlit'] = mock_st
 sys.modules['streamlit.components'] = MagicMock()
 sys.modules['streamlit.components.v1'] = MagicMock()
 
-from md_to_html import (
+from md_converter import (
     validate_vendor_path,
     escape_js_string,
     escape_for_script_tag,
@@ -344,7 +344,7 @@ class TestIntegerOverflow:
 
     def test_extremely_long_filename(self):
         """Test filename at system limits."""
-        from md_to_html import sanitize_filename
+        from md_converter import sanitize_filename
 
         # Create filename at maximum length
         long_name = "a" * 100000
@@ -357,7 +357,7 @@ class TestIntegerOverflow:
     def test_negative_indentation_level(self):
         """Test that negative indentation is handled."""
         # This shouldn't happen in practice, but let's verify
-        from md_to_html import parse_summary_md
+        from md_converter import parse_summary_md
 
         with tempfile.TemporaryDirectory() as tmpdir:
             summary_path = os.path.join(tmpdir, "SUMMARY.md")
@@ -467,7 +467,7 @@ class TestUnicodeEdgeCases:
         Python 3 handles UTF-8 correctly, but let's verify the code
         doesn't have issues with unusual Unicode.
         """
-        from md_to_html import sanitize_filename
+        from md_converter import sanitize_filename
 
         # Various unusual Unicode characters
         cases = [
@@ -485,7 +485,7 @@ class TestUnicodeEdgeCases:
 
     def test_bidirectional_text(self):
         """Test bidirectional text handling."""
-        from md_to_html import sanitize_filename
+        from md_converter import sanitize_filename
 
         # Hebrew/Arabic with LTR embedding
         bidi_name = "test\u202aעברית\u202cname.html"

@@ -23,7 +23,7 @@ from unittest.mock import MagicMock
 # Add parent directory to path for imports
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-# Create comprehensive streamlit mock before importing md_to_html
+# Create comprehensive streamlit mock before importing md_converter
 mock_st = MagicMock()
 def mock_columns(num_cols, **kwargs):
     if isinstance(num_cols, list):
@@ -63,7 +63,7 @@ sys.modules['streamlit'] = mock_st
 sys.modules['streamlit.components'] = MagicMock()
 sys.modules['streamlit.components.v1'] = MagicMock()
 
-from md_to_html import (
+from md_converter import (
     safe_read_file,
     sanitize_filename,
     escape_for_script_tag,
